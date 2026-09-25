@@ -51,6 +51,27 @@ async function newPage(opts = {}) {
   page.on('console', m => { if (m.type() === 'error') problems.push(`console: ${m.text()}`); });
   return { context, page };
 }
+// Hour labels that are showing, per grid: how many, and how many run into the next one.
+const labels = (page, sel) => page.evaluate(sel => {
+  const rows = new Map();
+  for (const lab of document.querySelectorAll(sel)) {
+    if (getComputedStyle(lab).visibility === 'hidden') continue;
+    const text = [...lab.children].find(c => getComputedStyle(c).display !== 'none');
+    const r = text.getBoundingClientRect();
+    if (!r.width) continue;
+    if (!rows.has(lab.parentElement)) rows.set(lab.parentElement, []);
+    rows.get(lab.parentElement).push({ left: r.left, right: r.right, text: text.textContent });
+  }
+  let shown = 0, overlaps = 0, min = Infinity;
+  for (const list of rows.values()) {
+    list.sort((a, b) => a.left - b.left);
+    shown += list.length;
+    min = Math.min(min, list.length);
+    for (let i = 1; i < list.length; i++) if (list[i].left < list[i - 1].right + 1) overlaps++;
+  }
+  return { grids: rows.size, shown, overlaps, min, sample: [...rows.values()][0]?.map(x => x.text) };
+}, sel);
+
 const snap = async (page, name, full = true) => { if (shots) await page.screenshot({ path: join(shots, `${name}.png`), fullPage: full }); };
 
 try {
@@ -70,7 +91,11 @@ try {
   const firstNext = await cards.first().locator('.next').textContent();
   assert.match(firstNext, /start/i, `first card headline: ${firstNext}`);
   assert.ok(await page.locator('.alert.frost').count(), 'frost heads-up shows');
-  assert.ok(await page.locator('.mini rect.go').count() > 50, 'mini grids have green');
+  assert.ok(await page.locator('.mini i.go').count() > 50, 'mini grids have green');
+  const miniLabels = await labels(page, '.mini .m-h');
+  assert.equal(miniLabels.grids, 9, 'every card has an hour row');
+  assert.ok(miniLabels.min >= 4, `each card labels at least 4 hours: ${JSON.stringify(miniLabels)}`);
+  assert.equal(miniLabels.overlaps, 0, `card hour labels don't collide: ${JSON.stringify(miniLabels)}`);
   await snap(page, '02-jobs');
 
   // ——— This week ———
@@ -84,6 +109,13 @@ try {
   await page.goto(base + '#/job/deck-stain');
   await page.getByRole('heading', { name: 'Stain or seal the deck or fence' }).waitFor();
   assert.ok(await page.locator('.win').count() >= 1, 'deck stain has a window');
+  // A daylight job leaves out the night and labels every remaining hour.
+  const bigLabels = await labels(page, '.g-hours .g-h');
+  assert.equal(bigLabels.overlaps, 0, JSON.stringify(bigLabels));
+  assert.equal(bigLabels.shown, await page.locator('.g-hours .g-h').count(), `every hour labelled: ${JSON.stringify(bigLabels)}`);
+  assert.match(bigLabels.sample.join(' '), /AM .* PM/);
+  assert.ok(await page.locator('.g-hours .g-h').count() < 24, 'night hours left out');
+  await page.locator('.trimmed').waitFor();
   await snap(page, '04-detail');
   // A rainy hour on day 2 explains itself.
   const rainy = page.locator('.cell.no').nth(40);
@@ -144,7 +176,7 @@ try {
   await snap(page, '08-settings');
   await page.goto(base + '#/');
   assert.match(await page.locator('.now').textContent(), /°C/);
-  assert.ok(await page.locator('.mini rect.busy').count() > 0, 'busy hours show up');
+  assert.ok(await page.locator('.mini i.busy').count() > 0, 'busy hours show up');
   await page.goto(base + '#/job/ext-paint');
   assert.match(await page.locator('.checks').textContent(), /10°C/);
   await context.close();
@@ -158,12 +190,31 @@ try {
     await p2.locator('.cards .card').first().waitFor();
     const overflow = await p2.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     assert.ok(overflow <= 0, `no sideways scroll on a phone (${overflow}px)`);
+    const phoneMini = await labels(p2, '.mini .m-h');
+    assert.equal(phoneMini.overlaps, 0, `phone card labels: ${JSON.stringify(phoneMini)}`);
+    assert.ok(phoneMini.min >= 3, `phone card labels: ${JSON.stringify(phoneMini)}`);
     await snap(p2, `10-phone-${scheme}`);
     await p2.goto(base + '#/job/laundry');
     await p2.locator('.inspect').waitFor();
     const overflow2 = await p2.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     assert.ok(overflow2 <= 0, `detail fits a phone (${overflow2}px)`);
+    const phoneBig = await labels(p2, '.g-hours .g-h');
+    assert.equal(phoneBig.overlaps, 0, `phone grid labels: ${JSON.stringify(phoneBig)}`);
+    assert.equal(phoneBig.shown, await p2.locator('.g-hours .g-h').count(), `every hour labelled on a phone: ${JSON.stringify(phoneBig)}`);
+    // An any-time job keeps all 24 hours, still readable.
+    await p2.goto(base + '#/job/water');
+    await p2.locator('.inspect').waitFor();
+    assert.equal(await p2.locator('.g-hours .g-h').count(), 24);
+    const phone24 = await labels(p2, '.g-hours .g-h');
+    assert.equal(phone24.overlaps, 0, `24-hour phone labels: ${JSON.stringify(phone24)}`);
+    await p2.goto(base + '#/job/laundry');
+    await p2.locator('.inspect').waitFor();
     await snap(p2, `11-phone-detail-${scheme}`, false);
+    // Scrolled down, the hour row stays in view under the top bar.
+    await p2.locator('.g-row.far').last().scrollIntoViewIfNeeded();
+    const stuck = await p2.locator('.g-hours').boundingBox();
+    assert.ok(stuck.y >= 40 && stuck.y < 80, `hour row sticks under the bar (y=${stuck.y})`);
+    await snap(p2, `13-phone-detail-scrolled-${scheme}`, false);
     await p2.goto(base + '#/week');
     await p2.locator('.day').first().waitFor();
     await snap(p2, `12-phone-week-${scheme}`, false);

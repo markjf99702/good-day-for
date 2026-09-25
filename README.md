@@ -15,9 +15,11 @@ Checking all that yourself means scrolling an hourly forecast and doing arithmet
 </p>
 
 <p align="center">
-  <img src="docs/phone-detail.png" alt="One job on a phone: the best times to start, then an hour-by-hour grid" width="300">
+  <img src="docs/phone-detail.png" alt="One job on a phone: the best times to start" width="250">
   &nbsp;
-  <img src="docs/phone-week.png" alt="This week on a phone: what each day is good for" width="300">
+  <img src="docs/phone-grid.png" alt="The hour-by-hour grid on a phone, with every hour labelled along the top" width="250">
+  &nbsp;
+  <img src="docs/phone-week.png" alt="This week on a phone: what each day is good for" width="250">
 </p>
 
 <sub>Screenshots use a made-up sample forecast.</sub>
@@ -27,6 +29,7 @@ Checking all that yourself means scrolling an hourly forecast and doing arithmet
 - **28 jobs out of the box** across lawn, garden, paint and stain, driveway and concrete, roof and gutters, and laundry and car. Each one comes with typical label and extension limits.
 - **Green, amber, grey.** Green means go. Amber means it meets the minimums but it's close to a limit, has a 30–50% chance of rain, or misses an ideal. Grey-pink means a must-have fails. Night and off-hours are shown separately, so "it's dark" doesn't look like "it's raining".
 - **Shows why.** Tap any hour and every rule is listed with what the forecast actually shows, for example "Low of 44°F Sun 6 AM" or "40% chance of rain Wed 7 AM".
+- **Every hour labeled.** The grids show only the hours a job could start (a daylight job skips the night), so the squares are bigger. The hour labels along the top stay put while you scroll.
 - **This week view.** Day by day: what you can get done today, what you can do Saturday, and what's ruled out and why.
 - **Fits your week.** Tell it you're free evenings and weekends, and 10 AM Tuesday stops counting. Jobs that run themselves, like the sprinkler, ignore this.
 - **Lawn watering by the numbers.** It keeps a running water balance. Grass uses about 80% of the day's evapotranspiration, and rain puts water back. It only says to water when the lawn is actually short and no real rain is coming.

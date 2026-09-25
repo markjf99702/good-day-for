@@ -35,12 +35,6 @@ function h(tag, attrs, ...kids) {
   for (const kid of kids.flat(Infinity)) if (kid != null && kid !== false) el.append(kid instanceof Node ? kid : String(kid));
   return el;
 }
-function s(tag, attrs, ...kids) {
-  const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
-  for (const [k, v] of Object.entries(attrs || {})) if (v != null) el.setAttribute(k, v);
-  for (const kid of kids.flat(Infinity)) if (kid != null) el.append(kid instanceof Node ? kid : String(kid));
-  return el;
-}
 const lower = t => (t ? t[0].toLowerCase() + t.slice(1) : t);
 const persist = () => store.save(state);
 
@@ -130,6 +124,7 @@ function parseRoute() {
 
 function render() {
   fmt = makeFmt(state.units);
+  fitLabels.disconnect();
   const { view, args } = parseRoute();
   renderHeader();
   let node;
@@ -249,20 +244,78 @@ function extraLines(job) {
   return out;
 }
 
+// The hours worth drawing for a job: every hour it could ever start, plus
+// one either side. A daylight job skips the night; an any-time job gets all 24.
+function hourSpan(res) {
+  let lo = 24, hi = -1;
+  for (let i = ctx.i0; i < ctx.n; i++) {
+    const r = res[i];
+    if (r && r.cls !== 'off' && r.cls !== 'unknown') { lo = Math.min(lo, ctx.hour[i]); hi = Math.max(hi, ctx.hour[i]); }
+  }
+  if (hi < 0 || hi - lo >= 20) return [0, 23];
+  return [Math.max(0, lo - 1), Math.min(23, hi + 1)];
+}
+
+// One label per hour column. Which ones show (and long or short) depends on
+// how wide the columns turn out, which fitLabels works out after layout.
+function hourLabels(lo, hi, cls) {
+  const out = [];
+  for (let hr = lo; hr <= hi; hr++) {
+    const d = [2, 3, 6].filter(k => hr % k === 0).map(k => `d${k}`).join(' ');
+    // Compact: bare numbers, with a/p only on the first hour and at noon and midnight.
+    const num = hr === lo || hr % 12 === 0 ? fmt.shortHour(hr) : fmt.h12 ? String(hr % 12) : String(hr);
+    out.push(h('span', { class: `${cls} ${d}` },
+      h('span', { class: 'hl-long' }, fmt.hourOf(hr)),
+      h('span', { class: 'hl-short' }, fmt.shortHour(hr)),
+      h('span', { class: 'hl-num' }, num)));
+  }
+  return out;
+}
+
+// Measures the column pitch and the label text, then picks the densest
+// labelling that doesn't collide: every hour spelled out ("7 AM"), every hour
+// short ("7a"), every hour compact ("6a 7 8 … 12p 1"), or short every 2, 3 or 6.
+const measure = document.createElement('canvas').getContext('2d');
+const fitLabels = new ResizeObserver(entries => {
+  for (const { target: el } of entries) {
+    const heads = [...el.querySelectorAll('.g-h, .m-h')];
+    if (heads.length < 2) { el.dataset.fit = '1'; continue; }
+    const pitch = heads[1].getBoundingClientRect().left - heads[0].getBoundingClientRect().left;
+    if (!pitch) continue;
+    const cs = getComputedStyle(heads[0]);
+    measure.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+    // Labels sit centred over their squares, so two neighbours fit when half of
+    // each, plus a little air, fits between their centres.
+    const fits = (sel, k = 1) => {
+      const shown = heads.filter(hd => k === 1 || hd.classList.contains(`d${k}`));
+      const w = hd => measure.measureText(hd.querySelector(sel).textContent).width;
+      for (let i = 1; i < shown.length; i++) if ((w(shown[i - 1]) + w(shown[i])) / 2 + 3 > pitch * k) return false;
+      return true;
+    };
+    if (!el.classList.contains('mini') && fits('.hl-long')) el.dataset.fit = 'long';
+    else if (fits('.hl-short')) el.dataset.fit = '1';
+    else if (fits('.hl-num')) el.dataset.fit = 'num';
+    else el.dataset.fit = String([2, 3, 6].find(k => fits('.hl-short', k)) || 6);
+  }
+});
+
 function miniGrid(res) {
   const first = firstIndexByDate();
   const dates = [...first.keys()].filter(d => d >= today()).slice(0, 7);
-  const cw = 10, ch = 10, lw = 26;
-  const svg = s('svg', { class: 'mini', viewBox: `0 0 ${lw + 24 * cw} ${dates.length * ch}`, 'aria-hidden': 'true', preserveAspectRatio: 'xMinYMin meet' });
-  dates.forEach((d, row) => {
-    svg.append(s('text', { x: 0, y: row * ch + ch - 2.5, class: 'lbl' }, fmt.wd(d).slice(0, 2)));
-    for (let i = first.get(d); i < ctx.n && ctx.date[i] === d; i++) {
-      svg.append(s('rect', { x: lw + ctx.hour[i] * cw, y: row * ch, width: cw - 1.5, height: ch - 1.5, rx: 1.5, class: cellClass(res, i) }));
-    }
-  });
-  // A faint line at noon helps the eye.
-  svg.append(s('line', { x1: lw + 12 * cw - 0.75, x2: lw + 12 * cw - 0.75, y1: 0, y2: dates.length * ch, class: 'noon' }));
-  return svg;
+  const [lo, hi] = hourSpan(res);
+  const grid = h('div', { class: 'mini', 'aria-hidden': 'true', 'data-cols': hi - lo + 1, style: `--cols: ${hi - lo + 1}` },
+    h('span', { class: 'm-d' }),
+    hourLabels(lo, hi, 'm-h'),
+    dates.map(d => {
+      const cells = new Array(hi - lo + 1).fill(null);
+      for (let i = first.get(d); i < ctx.n && ctx.date[i] === d; i++) {
+        if (ctx.hour[i] >= lo && ctx.hour[i] <= hi) cells[ctx.hour[i] - lo] = i;
+      }
+      return [h('span', { class: 'm-d' }, fmt.wd(d).slice(0, 2)), cells.map(i => h('i', { class: i == null ? 'none' : cellClass(res, i) }))];
+    }),
+  );
+  fitLabels.observe(grid);
+  return grid;
 }
 
 function cellClass(res, i) {
@@ -463,9 +516,16 @@ function detailView(job, startArg) {
     }),
     h('h3', { class: 'sec' }, 'Hour by hour'),
     legend(),
+    trimmedNote(res),
     grid,
     inspector,
   );
+}
+
+function trimmedNote(res) {
+  const [lo, hi] = hourSpan(res);
+  if (lo === 0 && hi === 23) return null;
+  return h('p', { class: 'trimmed muted small' }, `Showing ${fmt.hourOf(lo)} to ${fmt.hourOf(hi)}. This job can’t start outside those hours.`);
 }
 
 function windowsList(job, wins, onPick) {
@@ -496,15 +556,19 @@ function windowsList(job, wins, onPick) {
 function bigGrid(job, res, onSelect) {
   const first = firstIndexByDate();
   const dates = [...first.keys()].filter(d => d >= today());
-  const grid = h('div', { class: 'grid', role: 'group', 'aria-label': 'Start times by day and hour. Use the arrow keys to move.' });
+  const [lo, hi] = hourSpan(res);
+  const cols = hi - lo + 1;
+  const grid = h('div', { class: 'grid', role: 'group', 'aria-label': 'Start times by day and hour. Use the arrow keys to move.', 'data-cols': cols, style: `--cols: ${cols}` });
   grid.append(h('div', { class: 'g-row g-hours', 'aria-hidden': 'true' },
     h('span', { class: 'g-day' }),
-    Array.from({ length: 24 }, (_, hr) => h('span', { class: 'g-h' }, hr % 6 === 0 ? fmt.shortHour(hr) : '')),
+    hourLabels(lo, hi, 'g-h'),
   ));
   dates.forEach((d, row) => {
     if (row === 7) grid.append(h('p', { class: 'g-far' }, 'Further out, the forecast is only a rough guide'));
-    const cells = new Array(24).fill(null);
-    for (let i = first.get(d); i < ctx.n && ctx.date[i] === d; i++) cells[ctx.hour[i]] = i;
+    const cells = new Array(cols).fill(null);
+    for (let i = first.get(d); i < ctx.n && ctx.date[i] === d; i++) {
+      if (ctx.hour[i] >= lo && ctx.hour[i] <= hi) cells[ctx.hour[i] - lo] = i;
+    }
     grid.append(h('div', { class: `g-row${row >= 7 ? ' far' : ''}` },
       h('span', { class: 'g-day' }, row === 0 ? 'Today' : `${fmt.wd(d)} ${+d.slice(8, 10)}`),
       cells.map(i => {
@@ -526,6 +590,7 @@ function bigGrid(job, res, onSelect) {
     const target = grid.querySelector(`[data-i="${selected.s + moves[e.key]}"]`);
     if (target) { target.click(); target.focus(); }
   });
+  fitLabels.observe(grid);
   return grid;
 }
 

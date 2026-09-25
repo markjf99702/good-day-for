@@ -172,11 +172,21 @@ main { width: 100%; max-width: 1100px; margin: 0 auto; padding: 1rem 16px 2rem; 
 .sub { margin: 0; font-size: .86rem; color: var(--ink-2); }
 .sub.extra { color: var(--ink); }
 .bonus { color: color-mix(in srgb, var(--iffy) 55%, var(--ink)); }
-.mini { width: 100%; height: auto; margin-top: .45rem; display: block; }
-.mini rect { fill: var(--c, var(--off)); }
-.mini rect.busy { opacity: .3; }
-.mini .lbl { font-size: 7.5px; fill: var(--ink-2); }
-.mini .noon { stroke: var(--ink-2); stroke-width: .5; opacity: .35; }
+.mini { display: grid; grid-template-columns: 1.3rem repeat(var(--cols), minmax(0, 1fr)); gap: 2px; margin-top: .5rem; align-items: center; }
+.mini i { display: block; height: 10px; border-radius: 2px; background: var(--c, var(--off)); }
+.mini i.none { background: transparent; }
+.mini i.busy { opacity: .3; }
+.m-d { font-size: .62rem; color: var(--ink-2); line-height: 1; }
+.m-h { font-size: .62rem; color: var(--ink-2); white-space: nowrap; line-height: 1.2; display: flex; justify-content: center; }
+
+/* Hour labels: long ("7 AM") when the columns are roomy, else short ("7a"),
+   compact ("6a 7 8 … 12p"), or short every 2nd, 3rd or 6th hour, so they never overlap. */
+.hl-long, .hl-num { display: none; }
+[data-fit="long"] .hl-long, [data-fit="num"] .hl-num { display: inline; }
+[data-fit="long"] .hl-short, [data-fit="num"] .hl-short { display: none; }
+[data-fit="2"] :is(.m-h, .g-h):not(.d2),
+[data-fit="3"] :is(.m-h, .g-h):not(.d3),
+[data-fit="6"] :is(.m-h, .g-h):not(.d6) { visibility: hidden; }
 .card.add { align-items: center; justify-content: center; flex-direction: row; gap: .6rem; min-height: 120px; border-style: dashed; box-shadow: none; color: var(--accent); font-weight: 600; background: transparent; }
 .plus { font-size: 1.6rem; line-height: 1; }
 
@@ -227,10 +237,15 @@ main { width: 100%; max-width: 1100px; margin: 0 auto; padding: 1rem 16px 2rem; 
 .win.iffy .w-why { color: color-mix(in srgb, var(--iffy) 55%, var(--ink)); }
 
 .grid { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: .6rem .5rem .6rem .4rem; }
-.g-row { display: grid; grid-template-columns: 3.4rem repeat(24, minmax(0, 1fr)); gap: 2px; align-items: center; margin-bottom: 2px; }
+.g-row { display: grid; grid-template-columns: 3.4rem repeat(var(--cols, 24), minmax(0, 1fr)); gap: 2px; align-items: center; margin-bottom: 2px; }
 .g-row.far { opacity: .62; }
-.g-hours { margin-bottom: 4px; }
-.g-h { font-size: .68rem; color: var(--ink-2); white-space: nowrap; overflow: visible; }
+.g-hours {
+  position: sticky; top: 3.4rem; z-index: 2;
+  background: var(--surface); margin: -.6rem 0 4px; padding: .55rem 0 .3rem;
+  border-bottom: 1px solid var(--line);
+}
+.g-h { font-size: .7rem; font-weight: 600; color: var(--ink-2); white-space: nowrap; display: flex; justify-content: center; }
+.trimmed { margin: -.4rem 0 .6rem; }
 .g-day { font-size: .78rem; color: var(--ink-2); white-space: nowrap; padding-right: .35rem; text-align: right; }
 .g-far { margin: .6rem 0 .35rem 3.6rem; font-size: .75rem; color: var(--ink-2); }
 .cell { display: block; height: 22px; border-radius: 3px; border: 0; padding: 0; background: var(--c, var(--off)); cursor: pointer; position: relative; }
