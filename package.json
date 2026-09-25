@@ -1,0 +1,9 @@
+{
+  "name": "good-day-for",
+  "private": true,
+  "type": "module",
+  "description": "Which hours the weather will let you stain the deck, paint, mow, seal the driveway and the rest.",
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  }
+}
