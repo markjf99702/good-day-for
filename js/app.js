@@ -3,10 +3,13 @@
 import { JOBS, GROUPS, byId } from './jobs.js';
 import { prepare, rateJob, findWindows, blockers, explain, alerts, waterBalance, rangesOn, localHourKey, GO, IFFY, NO, UNKNOWN } from './engine.js';
 import { makeFmt, relDay, ruleText, obsText, blockerText, alertText, RULE_TYPES, WHEN } from './text.js';
-import { unitFor } from './units.js';
-import { fetchForecast, searchPlaces, locate, nameFor, placeKey, placeLabel } from './weather.js';
+import { unitFor, measureFor } from './units.js';
+import { fetchForecast, fetchHistory, searchPlaces, locate, nameFor, placeKey, placeLabel } from './weather.js';
 import * as store from './store.js';
 import { zonedToUtc, downloadIcs, googleLink } from './cal.js';
+import { CALCS, calcById, jobsOf, inputsFor, quote, summaryOf, applyRoute, packName, packLabel, moneyFmt, numFmt } from './materials.js';
+import { historyRange, frostEntry, summarize, anchors, monthDayOf, dayOfSeason, monthTicks, seasonName, coolMonths, addDays, SEASON_DAYS, HARD, VERSION as FROST_VERSION } from './frost.js';
+import { CROPS, KINDS, GROUPS as PLANT_GROUPS, calendar, segments, windowsNear, weekPlan, seasonFor, say } from './planting.js';
 
 const STATES = ['go', 'iffy', 'no', 'unknown'];
 const STATE_NAMES = { go: 'Go', iffy: 'Iffy', no: 'No', unknown: 'No data yet', off: 'Dark / off-hours', busy: 'You’re busy', past: 'Already past' };
@@ -19,6 +22,8 @@ let results = new Map();
 let loading = false, loadError = '', fetchToken = 0;
 let lastView = '';
 let selected = null; // { id, s } start hour picked in the detail view
+let frost = null, frostKey = '', frostBusy = false, frostErr = '', frostToken = 0; // frost dates for the current place
+const locale = globalThis.navigator?.language || 'en-US';
 
 // ——— Little DOM helpers ———
 
@@ -36,6 +41,8 @@ function h(tag, attrs, ...kids) {
   return el;
 }
 const lower = t => (t ? t[0].toLowerCase() + t.slice(1) : t);
+// replaceChildren, but skipping empties and flattening lists the way h() does.
+const put = (el, ...kids) => el.replaceChildren(...kids.flat(Infinity).filter(k => k != null && k !== false).map(k => (k instanceof Node ? k : String(k))));
 const persist = () => store.save(state);
 
 // ——— Jobs and results ———
@@ -111,6 +118,11 @@ function setPlace(p) {
   state.recent = [state.place, ...state.recent.filter(r => placeKey(r) !== placeKey(state.place))].slice(0, 5);
   persist();
   fc = null;
+  frost = null;
+  frostKey = '';
+  frostErr = '';
+  frostBusy = false;
+  frostToken++;
   location.hash = '#/';
   refresh(true);
 }
@@ -125,12 +137,18 @@ function parseRoute() {
 function render() {
   fmt = makeFmt(state.units);
   fitLabels.disconnect();
+  barWatch?.disconnect();
   const { view, args } = parseRoute();
   renderHeader();
+  const key = `${view}/${args[0] || ''}`;
+  const arriving = key !== lastView;
+  if (fc) ensureCtx();
   let node;
   if (view === 'settings') node = settingsView();
   else if (view === 'place') node = placeView();
+  else if (view === 'buy') node = calcById(args[0]) ? calcView(calcById(args[0]), args[1], arriving) : buyView();
   else if (!state.place) node = welcomeView();
+  else if (view === 'frost') node = frostView();
   else if (view === 'jobs') node = catalogView();
   else if (view === 'new') node = editorView(null);
   else if (view === 'edit' && jobFor(args[0])) node = editorView(jobFor(args[0]));
@@ -142,8 +160,7 @@ function render() {
   }
   const app = $('#app');
   app.replaceChildren(node);
-  const key = `${view}/${args[0] || ''}`;
-  if (key !== lastView) {
+  if (arriving) {
     window.scrollTo(0, 0);
     lastView = key;
   }
@@ -152,8 +169,9 @@ function render() {
 // Background updates (a fresh forecast, the clock ticking over) shouldn't wipe
 // out a form someone is typing in.
 function softRender() {
-  const { view } = parseRoute();
-  if (['edit', 'new', 'place'].includes(view) || (view !== 'settings' && !state.place)) renderHeader();
+  const { view, args } = parseRoute();
+  const typing = ['edit', 'new', 'place'].includes(view) || (view === 'buy' && calcById(args[0]));
+  if (typing || (view !== 'settings' && view !== 'buy' && !state.place)) renderHeader();
   else render();
 }
 
@@ -330,20 +348,27 @@ function cellClass(res, i) {
 
 function homeView(tab) {
   const list = pickedJobs();
-  const al = alerts(ctx);
   return h('div', { class: 'home' },
-    h('div', { class: 'topline' }, nowLine(), statusLine()),
+    headBlock(tab),
+    tab === 'jobs' ? jobsTab(list) : weekTab(list),
+  );
+}
+
+// The top of every main view: the weather right now, any heads-up, and the tabs.
+function headBlock(tab) {
+  const al = fc && ctx ? alerts(ctx) : [];
+  return [
+    fc && ctx && h('div', { class: 'topline' }, nowLine(), statusLine()),
     al.length > 0 && h('section', { class: 'alerts', 'aria-label': 'Heads up' },
       al.map(a => {
         const t = alertText(a, ctx, fmt, today());
         return h('div', { class: `alert ${a.kind}` }, h('span', { class: 'a-ico', 'aria-hidden': 'true' }, t.icon), h('div', {}, h('b', {}, t.title), h('span', {}, ' ', t.body)));
       })),
     h('nav', { class: 'tabs', 'aria-label': 'Views' },
-      h('a', { href: '#/', 'aria-current': tab === 'jobs' ? 'page' : null }, 'By job'),
-      h('a', { href: '#/week', 'aria-current': tab === 'week' ? 'page' : null }, 'This week'),
+      [['jobs', '#/', 'By job'], ['week', '#/week', 'This week'], ['frost', '#/frost', 'Planting'], ['buy', '#/buy', 'How much']].map(([k, href, label]) =>
+        h('a', { href, 'aria-current': tab === k ? 'page' : null }, label)),
     ),
-    tab === 'jobs' ? jobsTab(list) : weekTab(list),
-  );
+  ];
 }
 
 function jobsTab(list) {
@@ -504,8 +529,10 @@ function detailView(job, startArg) {
           edited && h('span', { class: 'chip warn' }, 'Your edited rules'),
           isCustom && h('span', { class: 'chip' }, 'Your own job'),
         ),
+        seasonLine(job),
       ),
       h('div', { class: 'd-actions' },
+        buyLink(job) && h('a', { class: 'btn ghost buy-link', href: `#/buy/${buyLink(job)}` }, h('span', { 'aria-hidden': 'true' }, '🧮'), 'How much to buy'),
         h('a', { class: 'btn ghost', href: `#/edit/${encodeURIComponent(job.id)}` }, 'Edit rules'),
         h('button', { class: 'btn ghost', onclick: () => copyJob(job) }, 'Make a copy'),
       ),
@@ -662,6 +689,595 @@ function copyJob(job) {
   state.picks.push(id);
   persist();
   location.hash = `#/edit/${id}`;
+}
+
+// ——— How much to buy ———
+
+// The calculator that goes with a job, as a route like 'stain' or 'seed/warm'.
+// Jobs edited before this existed don't carry it, so fall back to the catalog.
+const buyLink = job => job.buy || byId(job.id)?.buy || null;
+
+const cash = () => moneyFmt(locale);
+const shown = x => (x == null ? '' : String(Math.round(x * 100) / 100));
+let barWatch = null, flash = '';
+
+function buyView() {
+  return h('div', { class: 'buy' },
+    headBlock('buy'),
+    h('div', { class: 'b-intro' },
+      h('h2', {}, 'How much to buy'),
+      h('p', { class: 'muted' }, 'Put in the size of the job and get the cans and bags to pick up, with a little extra and a price. The coverage figures are typical ones: change any of them to match your product, because the label wins.'),
+    ),
+    savedList(),
+    h('div', { class: 'cards calcs' }, CALCS.map(c => h('a', { class: 'card', href: `#/buy/${c.id}` },
+      h('div', { class: 'c-head' }, h('span', { class: 'ico', 'aria-hidden': 'true' }, c.icon), h('h3', {}, c.name)),
+      h('p', { class: 'sub' }, c.about),
+      lastTime(c),
+    ))),
+  );
+}
+
+// What's typed into a calculator right now, as a line for its card.
+function lastTime(calc) {
+  const saved = state.calc[calc.id];
+  if (!saved) return null;
+  const inputs = inputsFor(calc, state.units, saved);
+  const q = quote(calc, inputs, locale);
+  if (q.missing) return null;
+  return h('p', { class: 'sub extra' }, `${summaryOf(calc, inputs, locale)}: ${q.parts.map(p => p.headline).join(' and ')}`);
+}
+
+function savedList() {
+  const list = state.saved.filter(s => calcById(s.calc));
+  if (!list.length) return null;
+  return h('section', { class: 'saved' },
+    h('h3', { class: 'sec' }, 'Your saved measurements'),
+    h('ul', { class: 'saved-list' }, list.map(s => {
+      const calc = calcById(s.calc);
+      const q = quote(calc, inputsFor(calc, state.units, s), locale);
+      const what = q.missing ? '' : [q.parts.map(p => p.headline).join(' and '), q.total != null && cash()(q.total)].filter(Boolean).join(' · ');
+      return h('li', {},
+        h('button', { class: 'saved-open', type: 'button', onclick: () => openSaved(s) },
+          h('span', { class: 'ico', 'aria-hidden': 'true' }, calc.icon),
+          h('span', {}, h('b', {}, s.name), what && h('small', {}, what))),
+        h('button', { class: 'x', type: 'button', 'aria-label': `Forget “${s.name}”`, onclick: () => {
+          state.saved = state.saved.filter(x => x !== s);
+          persist();
+          render();
+        } }, '×'));
+    })));
+}
+
+const snapshot = s => structuredClone({ v: s.v, m: s.m || {}, c: s.c || {}, f: s.f || {} });
+
+function openSaved(s) {
+  state.calc[s.calc] = snapshot(s);
+  persist();
+  location.hash = `#/buy/${s.calc}${s.v ? `/${s.v}` : ''}`;
+}
+
+function calcView(calc, word, arriving) {
+  const saved = state.calc[calc.id] || (state.calc[calc.id] = {});
+  const route = applyRoute(calc, word, saved);
+  if (route.v && saved.v !== route.v) { saved.v = route.v; persist(); }
+  // A job's link can pick the grass; only on the way in, so it doesn't undo your own choice.
+  if (route.choices && arriving) {
+    saved.c = saved.c || {};
+    saved.c[''] = { ...(saved.c[''] || {}), ...route.choices };
+    persist();
+  }
+  const box = h('div', { class: 'calc' });
+  const draw = () => {
+    const focus = document.activeElement?.id;
+    put(box, calcBody(calc, saved, draw));
+    if (focus) document.getElementById(focus)?.focus({ preventScroll: true });
+  };
+  draw();
+  return box;
+}
+
+function calcBody(calc, saved, draw) {
+  const units = state.units;
+  const inp = inputsFor(calc, units, saved);
+  const v = inp.v;
+  saved.m = saved.m || {};
+  saved.c = saved.c || {};
+  saved.f = saved.f || {};
+  const figs = () => {
+    const byUnits = saved.f[inp.units] || (saved.f[inp.units] = {});
+    return byUnits[v] || (byUnits[v] = {});
+  };
+  const choices = () => saved.c[v] || (saved.c[v] = {});
+  const idOf = k => `c-${calc.id}-${k}`.replace(/[^\w-]/g, '_');
+
+  const out = h('aside', { class: 'calc-out', 'aria-live': 'polite', 'aria-label': 'What to buy', tabindex: '-1' });
+  const bar = h('button', { class: 'calc-bar', type: 'button', onclick: () => out.scrollIntoView({ behavior: 'smooth', block: 'start' }) });
+  const update = () => fillAnswer(calc, saved, out, bar, draw);
+
+  const measureRows = calc.measure(v, units).map(fd => {
+    if (fd.type === 'head') return h('h4', { class: 'fld-head' }, fd.label);
+    if (fd.when && !fd.when(inp.m)) return null;
+    const id = idOf(fd.key);
+    if (fd.type === 'choice') return choiceRow(id, fd.label, inp.m[fd.key], fd.options, x => { saved.m[fd.key] = x; persist(); draw(); });
+    if (fd.type === 'check') return checkRow(id, fd.label, !!inp.m[fd.key], x => { saved.m[fd.key] = x; persist(); update(); });
+    const u = measureFor(fd.kind, units);
+    return numRow({ id, label: fd.label, value: inp.m[fd.key], unit: u.label, hint: fd.hint, count: fd.kind === 'count',
+      onInput: x => { saved.m[fd.key] = x == null ? null : u.from(x); persist(); update(); } });
+  });
+
+  const figureRows = inp.figures.map(fd => {
+    if (fd.when && !fd.when(inp.f)) return null;
+    const id = idOf(`f-${fd.key}`);
+    if (fd.type === 'choice') {
+      return choiceRow(id, fd.label, inp.f[fd.key], fd.options, x => {
+        choices()[fd.key] = x;
+        for (const k of fd.resets || []) delete figs()[k];
+        persist();
+        draw();
+      });
+    }
+    if (fd.type === 'check') return checkRow(id, fd.label, !!inp.f[fd.key], x => { choices()[fd.key] = x; persist(); draw(); });
+    const typical = typeof fd.def === 'function' ? fd.def(inp.f) : fd.def;
+    const mine = figs()[fd.key];
+    return numRow({ id, label: fd.label, value: inp.f[fd.key], unit: fd.unit, hint: fd.hint, count: fd.step === 1,
+      onInput: x => { if (x == null || !(x >= 0)) delete figs()[fd.key]; else figs()[fd.key] = x; persist(); update(); },
+      extra: typeof mine === 'number' && mine !== typical && h('button', { class: 'link small', type: 'button', onclick: () => { delete figs()[fd.key]; persist(); draw(); } }, `Back to the typical ${shown(typical)}`) });
+  });
+
+  const money = cash();
+  const partNames = Object.keys(inp.packs);
+  const packRows = partNames.flatMap(part => [
+    partNames.length > 1 && h('h4', { class: 'fld-head' }, part === 'primer' ? 'Primer' : 'Paint'),
+    ...inp.packs[part].map(p => h('div', { class: 'fld pack' },
+      h('span', { class: 'pk-name' }, packName(p)),
+      p.editSize
+        ? h('span', { class: 'num pk-size' },
+          p.sizeLabel && h('span', { class: 'unit' }, p.sizeLabel),
+          h('input', { id: idOf(`${part}-${p.id}-size`), type: 'number', inputmode: 'decimal', min: 0, step: 'any', value: shown(p.size), 'aria-label': `${packName(p)}: ${p.sizeLabel || 'size'} (${p.unit})`,
+            oninput: e => { const x = +e.target.value; if (e.target.value === '' || !(x > 0)) delete figs()[`${part}.${p.id}.size`]; else figs()[`${part}.${p.id}.size`] = x; persist(); update(); } }),
+          h('span', { class: 'unit' }, p.unit))
+        : h('span', { class: 'pk-size' }),
+      priceInput(idOf(`${part}-${p.id}-price`), p.price, money.symbol, `${packName(p)}: price`, x => { figs()[`${part}.${p.id}.price`] = x; persist(); update(); }),
+    )),
+  ]);
+  if (inp.bulk) {
+    packRows.push(h('div', { class: 'fld pack' },
+      h('span', { class: 'pk-name' }, inp.bulk.name),
+      h('span', { class: 'pk-size unit' }, `per ${inp.bulk.unit}`),
+      priceInput(idOf('bulk-price'), inp.bulk.price, money.symbol, `${inp.bulk.name}: price per ${inp.bulk.unit}`, x => { figs()['bulk.price'] = x; persist(); update(); }),
+    ));
+  }
+
+  const jobs = jobsOf(calc, v).map(jobFor).filter(Boolean);
+  const form = h('div', { class: 'calc-form' },
+    h('section', {}, h('h3', { class: 'sec' }, 'Measure'), h('div', { class: 'flds' }, measureRows)),
+    h('section', {},
+      h('h3', { class: 'sec' }, 'From the label'),
+      h('div', { class: 'flds' }, figureRows),
+      h('p', { class: 'muted small' }, 'Typical figures. If your product’s label says something different, go with the label.')),
+    h('section', {},
+      h('h3', { class: 'sec' }, 'What the store sells'),
+      h('div', { class: 'flds' }, packRows),
+      h('p', { class: 'muted small' }, 'Prices are rough guesses, so put in your store’s. Leave one blank for a size it doesn’t carry.')),
+  );
+
+  barWatch?.disconnect();
+  if ('IntersectionObserver' in window) {
+    barWatch = new IntersectionObserver(([e]) => bar.classList.toggle('away', e.isIntersecting), { threshold: 0.02 });
+    queueMicrotask(() => barWatch?.observe(out));
+  }
+  update();
+
+  const mine = state.saved.filter(s => s.calc === calc.id);
+  return [
+    h('a', { class: 'back', href: '#/buy' }, '← How much to buy'),
+    h('div', { class: 'd-head' },
+      h('span', { class: 'ico big', 'aria-hidden': 'true' }, calc.icon),
+      h('div', {},
+        h('h2', {}, calc.name),
+        h('p', { class: 'about' }, calc.about),
+        jobs.length > 0 && state.place && h('p', { class: 'when-link' }, 'Good day for it? ', jobs.map((j, k) => [k ? ' · ' : '', h('a', { href: `#/job/${encodeURIComponent(j.id)}` }, j.name)])),
+      ),
+    ),
+    calc.variants && h('nav', { class: 'tabs seg', 'aria-label': 'Which one' },
+      calc.variants.map(([k, l]) => h('a', { href: `#/buy/${calc.id}/${k}`, 'aria-current': k === v ? 'page' : null }, l))),
+    mine.length > 0 && h('div', { class: 'recent saved-chips' }, h('span', { class: 'muted small' }, 'Saved: '),
+      mine.map(s => h('button', { class: 'chip-btn', type: 'button', onclick: () => {
+        Object.assign(saved, snapshot(s));
+        persist();
+        if (calc.variants && s.v && parseRoute().args[1] !== s.v) location.hash = `#/buy/${calc.id}/${s.v}`;
+        else draw();
+      } }, s.name))),
+    h('div', { class: 'calc-cols' }, form, out),
+    bar,
+  ];
+}
+
+function numRow({ id, label, value, unit, hint, count, onInput, extra }) {
+  return h('div', { class: 'fld' },
+    h('label', { for: id }, label),
+    h('span', { class: 'num' },
+      h('input', { id, type: 'number', inputmode: count ? 'numeric' : 'decimal', min: 0, step: count ? 1 : 'any', value: shown(value),
+        oninput: e => onInput(e.target.value === '' ? null : +e.target.value) }),
+      h('span', { class: 'unit' }, unit || '')),
+    (hint || extra) && h('small', { class: 'hint' }, hint, hint && extra ? ' ' : '', extra),
+  );
+}
+
+function choiceRow(id, label, value, options, onChange) {
+  return h('div', { class: 'fld choice' },
+    h('label', { for: id }, label),
+    h('select', { id, onchange: e => onChange(e.target.value) }, options.map(([k, l]) => h('option', { value: k, selected: k === value }, l))));
+}
+
+function checkRow(id, label, checked, onChange) {
+  return h('div', { class: 'fld check' },
+    h('label', { class: 'check' }, h('input', { id, type: 'checkbox', checked, onchange: e => onChange(e.target.checked) }), label));
+}
+
+function priceInput(id, price, symbol, label, onChange) {
+  return h('span', { class: 'num pk-price' },
+    symbol && h('span', { class: 'unit' }, symbol),
+    h('input', { id, type: 'number', inputmode: 'decimal', min: 0, step: 'any', value: price == null ? '' : shown(price), placeholder: 'none', 'aria-label': label,
+      oninput: e => onChange(e.target.value === '' ? null : Math.max(0, +e.target.value)) }));
+}
+
+function fillAnswer(calc, saved, out, bar, draw) {
+  const inputs = inputsFor(calc, state.units, saved);
+  const q = quote(calc, inputs, locale);
+  const n = numFmt(locale), money = cash();
+  if (q.missing) {
+    put(out,
+      h('h3', {}, 'What to buy'),
+      h('p', { class: 'muted' }, `Put in ${q.missing} to see how much to buy.`),
+      q.steps.length > 0 && stepsList(q.steps));
+    put(bar, h('span', { class: 'bar-what muted' }, `Put in ${q.missing}.`));
+    return;
+  }
+  const note = flash;
+  flash = '';
+  put(out,
+    h('h3', {}, 'What to buy'),
+    q.parts.map(p => h('div', { class: 'part' },
+      q.parts.length > 1 && h('h4', {}, p.label),
+      h('ul', { class: 'buy-list' }, p.buy.items.map(x => h('li', {},
+        h('b', {}, packLabel(x.pack, x.n, n)),
+        typeof x.pack.price === 'number' && h('span', { class: 'cost' }, x.n > 1 ? `${x.n} × ${money(x.pack.price)}` : money(x.pack.price))))),
+      h('p', { class: 'muted small' }, `That’s ${n(p.buy.amount)} ${p.unit} for the ${n(p.need)} ${p.unit} you need.`),
+    )),
+    h('p', { class: 'total' }, q.total != null ? [h('span', {}, 'Total'), h('b', {}, money(q.total))] : h('span', {}, 'Add prices to see a total.')),
+    q.bulk && h('p', { class: 'bulk' }, `Or ${lower(q.bulk.name)}: ${n(q.bulk.amount)} ${q.bulk.unit}${q.bulk.cost != null ? `, about ${money(q.bulk.cost)}` : ''}, ${q.bulk.plus}.`),
+    q.tips.length > 0 && h('ul', { class: 'tips' }, q.tips.map(t => h('li', {}, t))),
+    h('h4', { class: 'how' }, 'How it adds up'),
+    stepsList(q.steps),
+    saveForm(calc, saved, inputs, draw, note),
+  );
+  put(bar,
+    h('span', { class: 'bar-what' }, h('small', {}, 'Buy '), q.parts.map(p => p.headline).join(' + ')),
+    q.total != null && h('b', {}, money(q.total)));
+}
+
+function stepsList(steps) {
+  return h('dl', { class: 'steps' }, steps.map(([k, v]) => [h('dt', {}, k), h('dd', {}, v)]));
+}
+
+function saveForm(calc, saved, inputs, draw, note) {
+  const auto = summaryOf(calc, inputs, locale);
+  const input = h('input', { type: 'text', id: `c-${calc.id}-name`, maxlength: 80, placeholder: auto, autocomplete: 'off' });
+  return h('form', { class: 'save-row', onsubmit: e => {
+    e.preventDefault();
+    const name = input.value.trim() || auto;
+    state.saved = [{ calc: calc.id, name, ...snapshot(saved), at: Date.now() }, ...state.saved.filter(s => !(s.calc === calc.id && s.name === name))];
+    persist();
+    flash = `Saved as “${name}”. It’s on the How much to buy page too.`;
+    draw();
+  } },
+  h('label', { for: input.id }, 'Save these measurements as'),
+  h('div', { class: 'p-row' }, input, h('button', { class: 'btn', type: 'submit' }, 'Save')),
+  note && h('p', { class: 'small ok-note', role: 'status' }, note));
+}
+
+// ——— Frost dates & planting ———
+
+// Today's date where the place is.
+function placeToday() {
+  if (fc && ctx) return today();
+  return localHourKey(Date.now(), frost?.tz || undefined).slice(0, 10);
+}
+
+// The cached frost dates for a place (never fetches).
+function frostFor(place) {
+  const key = placeKey(place);
+  if (frostKey !== key) {
+    frostKey = key;
+    frost = store.loadFrost(key);
+    frostErr = '';
+  }
+  return frost && frost.v === FROST_VERSION ? frost : null;
+}
+
+function frostView() {
+  const entry = frostFor(state.place);
+  const range = historyRange(placeToday(), state.place.lat);
+  const current = !!entry && entry.start === range.start && entry.end === range.end;
+  // Fetched only here, and only when there's nothing for this year yet.
+  if (!current && !frostBusy && !frostErr) loadFrost(range);
+  let body;
+  if (entry) body = frostBody(entry, current);
+  else if (frostErr) {
+    body = h('div', { class: 'loading' },
+      h('p', { class: 'err', role: 'alert' }, frostErr),
+      h('button', { class: 'btn', onclick: () => { frostErr = ''; render(); } }, 'Try again'));
+  } else {
+    body = h('div', { class: 'loading' },
+      h('span', { class: 'spin', 'aria-hidden': 'true' }),
+      h('p', {}, `Looking up 30 years of weather for ${placeLabel(state.place)}…`),
+      h('p', { class: 'muted small' }, 'Once a year per place. After that it’s kept in this browser.'));
+  }
+  return h('div', { class: 'frost' }, headBlock('frost'), body);
+}
+
+async function loadFrost(range) {
+  const place = state.place, key = placeKey(place), token = ++frostToken;
+  frostBusy = true;
+  frostErr = '';
+  try {
+    const raw = await fetchHistory(place, range);
+    if (token !== frostToken) return;
+    frost = frostEntry(raw, key, range);
+    store.saveFrost(frost);
+  } catch (e) {
+    if (token !== frostToken) return;
+    frostErr = navigator.onLine === false ? 'You’re offline. The frost dates need a one-time download.' : e.message || 'Couldn’t reach the weather history service.';
+  }
+  frostBusy = false;
+  if (parseRoute().view === 'frost') render();
+}
+
+function frostBody(entry, current) {
+  const sum = summarize(entry);
+  const south = sum.south;
+  const md = idx => fmt.monthDay(`2000-${monthDayOf(idx, south)}`);
+  const todayD = placeToday();
+  const years = sum.n ? (south ? `${seasonName(sum.first, true)} to ${seasonName(sum.last, true)}` : `${sum.first}–${sum.last}`) : '';
+  const anc = anchors(sum);
+  return h('div', { class: 'frost-body' },
+    h('div', { class: 'b-intro' },
+      h('h2', {}, 'Frost dates'),
+      h('p', { class: 'muted' },
+        sum.n ? `From ${sum.n} years of weather history for this spot, ${years}.` : 'From the weather history for this spot.',
+        !current && (frostBusy ? ' Adding last year…' : frostErr ? ` Couldn’t add last year: ${frostErr}` : ''))),
+    frostStats(sum, md),
+    anc && thisWeekPlan(anc, south, todayD),
+    anc && plantingCalendar(anc, south, todayD, md),
+    !anc && sum.regime !== 'thin' && noFrostPlanting(sum),
+    sum.n > 0 && sum.regime !== 'none' && everyYear(entry, sum, md),
+    frostMethod(entry, sum),
+  );
+}
+
+function stat(key, value, sub, ...lines) {
+  return h('div', { class: 'fs' },
+    h('span', { class: 'fs-k' }, key),
+    h('b', { class: 'fs-v' }, value),
+    h('span', { class: 'fs-sub' }, sub),
+    lines.filter(Boolean).map(l => h('p', {}, l)));
+}
+
+function frostStats(sum, md) {
+  const f = sum.frost, T = fmt.temp(0);
+  const day = d => (d ? fmt.fullDate(d) : '–');
+  if (sum.regime === 'thin') {
+    return h('div', { class: 'wins empty' }, h('p', {}, h('b', {}, 'Not enough history to work out frost dates here.'), ` Only ${sum.n} complete years came back for this spot.`));
+  }
+  if (sum.regime === 'none') {
+    return h('div', { class: 'fstats one' },
+      stat('Frost', `None in ${sum.n} years`, `The air never got down to ${T} here.`,
+        sum.coldest && `The coldest night was ${fmt.temp(sum.coldest.v)}, on ${day(sum.coldest.on)}.`));
+  }
+  const cards = sum.regime === 'mild'
+    ? [
+      stat('Frost', `${f.withAny} of ${sum.n} winters`, `In most years it never gets down to ${T}.`,
+        f.last.p90 != null && ['1 year in 10 there’s still a frost after ', h('b', {}, md(f.last.p90)), '.']),
+      f.last.count > 0 && stat('Last frost, when there is one', md(f.last.among ?? dayOfSeason(f.last.latest, sum.south)), 'Typical, in the years it came.', `Latest: ${day(f.last.latest)}.`),
+      f.first.count > 0 && stat('First frost, when there is one', md(f.first.among ?? dayOfSeason(f.first.earliest, sum.south)), 'Typical, in the years it came.', `Earliest: ${day(f.first.earliest)}.`),
+    ]
+    : [
+      stat('Last spring frost', md(f.last.median), 'Typical: half of years are later.',
+        ['1 year in 10 it’s later than ', h('b', {}, md(f.last.p90)), '.'],
+        `Latest: ${day(f.last.latest)}. Earliest: ${day(f.last.earliest)}.`),
+      stat('First fall frost', md(f.first.median), 'Typical: half of years are earlier.',
+        ['1 year in 10 it’s earlier than ', h('b', {}, md(f.first.p10)), '.'],
+        `Earliest: ${day(f.first.earliest)}. Latest: ${day(f.first.latest)}.`),
+      stat('Frost-free season', `${f.days.median} days`, 'Typical, from the last frost to the first.',
+        ['1 year in 10 it’s shorter than ', h('b', {}, `${f.days.p10} days`), '.'],
+        `Shortest: ${f.days.shortest} days. Longest: ${f.days.longest}.`),
+    ];
+  const hd = sum.hard, TH = fmt.temp(HARD);
+  let hard;
+  if (!hd.withAny) hard = `No hard freeze (${TH} or colder) in ${sum.n} years.`;
+  else if (hd.last.median == null || hd.first.median == null) hard = `A hard freeze (${TH} or colder) came in ${hd.withAny} of ${sum.n} winters.`;
+  else hard = ['Hard freeze (', TH, ' or colder, enough to kill tender plants and nip hardy ones): typically over by ', h('b', {}, md(hd.last.median)), ' and back by ', h('b', {}, md(hd.first.median)), '.'];
+  return [
+    h('div', { class: 'fstats' }, cards.filter(Boolean)),
+    h('p', { class: 'hard' }, h('span', { 'aria-hidden': 'true' }, '🥶 '), hard),
+    sum.anyMonth && h('p', { class: 'd-alert' }, 'Frost has come in every month of the year here, so no date is completely safe.'),
+  ];
+}
+
+// For a calendar row that matches a job: what the forecast says about it.
+function jobNote(job) {
+  const href = `#/job/${encodeURIComponent(job.id)}`;
+  if (!fc || !ctx) return h('a', { class: 'pl-job', href }, `${job.icon} ${job.name}: see which days work`);
+  const { res, wins } = resultFor(job);
+  const w = wins.find(x => x.quality === 'go') || wins[0];
+  let text;
+  if (w) {
+    const [a, b] = rangeOf(w);
+    text = `${w.quality === 'go' ? '' : 'iffy '}${relDay(ctx.date[a], today(), fmt)}, ${rangeText(a, b)}`;
+  } else {
+    const bl = blockerList(job, res).slice(0, 2);
+    text = `no window in the next ${daysLeft()} days${bl.length ? ` (${bl.join(', ').toLowerCase()})` : ''}`;
+  }
+  const soil = extraLines(job).find(t => t.startsWith('Soil'));
+  return h('a', { class: 'pl-job', href }, h('span', { 'aria-hidden': 'true' }, job.icon, ' '), `${job.short}: ${text}.`, soil ? ` ${soil}` : '');
+}
+
+function thisWeekPlan(anc, south, todayD) {
+  const plan = weekPlan(anc, south, todayD);
+  const item = (x, soon) => {
+    const job = x.crop.job && x.step.k !== 'indoors' ? jobFor(x.crop.job) : null;
+    const when = soon || x.start > todayD ? `from ${fmt.monthDay(x.start)}` : `until ${fmt.monthDay(x.end)}`;
+    return h('li', {},
+      h('i', { class: `dot k-${x.step.k}`, 'aria-hidden': 'true' }),
+      h('span', { class: 'ico', 'aria-hidden': 'true' }, x.crop.icon),
+      h('span', { class: 'nm' }, h('b', {}, x.crop.name), ' ', h('span', { class: 'do' }, say(x.step))),
+      h('span', { class: 't' }, when),
+      !soon && job && jobNote(job));
+  };
+  return h('section', { class: 'plan' },
+    h('h3', { class: 'sec' }, `What to do this week · ${fmt.monthDay(todayD)} – ${fmt.monthDay(plan.weekEnd)}`),
+    h('div', { class: 'day' },
+      plan.now.length
+        ? h('ul', { class: 'plan-list' }, plan.now.map(x => item(x, false)))
+        : h('p', { class: 'd-none' }, 'Nothing on the calendar this week.'),
+      plan.soon.length > 0 && h('div', { class: 'soon' },
+        h('p', { class: 'd-no' }, 'Coming up'),
+        h('ul', { class: 'plan-list' }, plan.soon.slice(0, 6).map(x => item(x, true))))),
+  );
+}
+
+const pct = x => `${(x / SEASON_DAYS * 100).toFixed(3)}%`;
+
+// Month names along the top of a season-long chart, plus an optional "today" label.
+function seasonAxis(south, now) {
+  const ticks = monthTicks(south);
+  const edge = now == null ? '' : now < SEASON_DAYS * 0.08 ? ' at-start' : now > SEASON_DAYS * 0.92 ? ' at-end' : '';
+  return h('div', { class: 'tl-row tl-head', 'aria-hidden': 'true' },
+    h('span', { class: 'tl-name' }),
+    h('span', { class: 'tl-track' },
+      ticks.map((t, k) => h('span', { class: 'tl-m', style: `left:${pct(t.idx)};width:${pct((ticks[k + 1]?.idx ?? SEASON_DAYS) - t.idx)}` },
+        h('span', { class: 'm-long' }, fmt.month(t.month)), h('span', { class: 'm-short' }, fmt.monthNarrow(t.month)))),
+      now != null && h('span', { class: `tl-now${edge}`, style: `left:${pct(now)}` }, 'This week')));
+}
+
+// Gridlines, the frost season and the typical dates, behind a chart's bars.
+function seasonLayer(south, anc, now) {
+  return [
+    h('div', { class: 'tl-layer', 'aria-hidden': 'true' },
+      monthTicks(south).map(t => h('i', { class: 'tl-grid', style: `left:${pct(t.idx)}` })),
+      anc && segments(anc.F, anc.L + SEASON_DAYS).map(([a, b]) => h('i', { class: 'tl-frost', style: `left:${pct(a)};width:${pct(b - a + 1)}` })),
+      anc && [anc.L, anc.F].map(x => h('i', { class: 'tl-line', style: `left:${pct(x)}` }))),
+    now != null && h('div', { class: 'tl-layer over', 'aria-hidden': 'true' }, h('i', { class: 'tl-today', style: `left:${pct(now)}` })),
+  ];
+}
+
+function plantingCalendar(anc, south, todayD, md) {
+  const rows = calendar(anc);
+  const now = dayOfSeason(todayD, south);
+  const tl = h('div', { class: 'tl' }, seasonAxis(south, now), seasonLayer(south, anc, now));
+  for (const [g, name] of PLANT_GROUPS) {
+    const list = rows.filter(r => r.crop.group === g);
+    if (!list.length) continue;
+    tl.append(h('div', { class: 'tl-group' }, name));
+    for (const r of list) {
+      const id = `tl-${r.crop.id}`;
+      const job = r.crop.job && jobFor(r.crop.job);
+      const lines = r.bars.map(b => {
+        const w = windowsNear(b.step, anc, south, todayD).find(x => x.end >= todayD);
+        return { b, text: w ? `${fmt.monthDay(w.start)} – ${fmt.monthDay(w.end)}` : `${md(b.a)} – ${md(b.b)}` };
+      });
+      const info = h('div', { class: 'tl-info', id, hidden: true },
+        h('ul', {}, lines.map(({ b, text }) => h('li', {}, h('i', { class: `dot k-${b.step.k}`, 'aria-hidden': 'true' }), h('b', {}, say(b.step)), ` ${text}`))),
+        h('p', { class: 'muted' }, r.crop.note),
+        job && h('a', { href: `#/job/${encodeURIComponent(job.id)}` }, `${job.icon} ${job.name}: see which hours work`));
+      const row = h('button', { class: 'tl-row', type: 'button', 'aria-expanded': 'false', 'aria-controls': id, onclick: () => {
+        const open = info.hidden;
+        info.hidden = !open;
+        row.setAttribute('aria-expanded', String(open));
+      } },
+      h('span', { class: 'tl-name' }, h('span', { class: 'ico', 'aria-hidden': 'true' }, r.crop.icon), h('span', { class: 'tl-nm' }, r.crop.name)),
+      h('span', { class: 'tl-track' },
+        r.bars.flatMap(b => segments(b.a, b.b).map(([x0, x1]) => h('i', { class: `tl-bar k-${b.step.k}`, style: `left:${pct(x0)};width:${pct(x1 - x0 + 1)}`, title: `${say(b.step)}: ${md(b.a)} – ${md(b.b)}` }))),
+        h('span', { class: 'sr' }, lines.map(({ b, text }) => `${say(b.step)} ${text}.`).join(' '))));
+      tl.append(row, info);
+    }
+  }
+  return h('section', { class: 'calendar' },
+    h('h3', { class: 'sec' }, 'Planting calendar'),
+    h('div', { class: 'legend' },
+      KINDS.map(([k, l]) => h('span', {}, h('i', { class: `sw k-${k}` }), l)),
+      h('span', {}, h('i', { class: 'sw frost-sw' }), 'Frost season'),
+      h('span', {}, h('i', { class: 'ln' }), `Typical last and first frost, ${md(anc.L)} and ${md(anc.F)}`),
+      h('span', { class: 'hint' }, 'Tap a row for this year’s dates.')),
+    tl,
+    h('p', { class: 'muted small' }, 'Counted in weeks from the typical frost dates. Where a row matches one of your jobs, like seeding the lawn, the job’s own rules pick the actual day.'),
+  );
+}
+
+function everyYear(entry, sum, md) {
+  const south = sum.south;
+  const list = [...entry.seasons].sort((a, b) => b.y - a.y);
+  const anc = sum.frost.last.median != null && sum.frost.first.median != null ? { L: sum.frost.last.median, F: sum.frost.first.median } : null;
+  const rows = list.map(s => {
+    const name = seasonName(s.y, south);
+    if (!s.ok) return h('div', { class: 'tl-row' }, h('span', { class: 'tl-name' }, name), h('span', { class: 'tl-track gap' }, 'Missing data'));
+    const a = s.lf ? dayOfSeason(s.lf, south) + 1 : 0, b = s.ff ? dayOfSeason(s.ff, south) - 1 : SEASON_DAYS - 1;
+    const text = `${s.lf ? `last frost ${fmt.monthDay(s.lf)}` : 'no spring frost'}, ${s.ff ? `first frost ${fmt.monthDay(s.ff)}` : 'no fall frost'}`;
+    return h('div', { class: 'tl-row', title: `${name}: ${text}` },
+      h('span', { class: 'tl-name' }, name),
+      h('span', { class: 'tl-track' },
+        b >= a && h('i', { class: 'tl-bar k-free', style: `left:${pct(a)};width:${pct(b - a + 1)}` }),
+        h('span', { class: 'sr' }, `${text}.`)));
+  });
+  return h('details', { class: 'years' },
+    h('summary', {}, `Every year since ${seasonName(list.at(-1).y, south)}`),
+    h('p', { class: 'muted small' }, 'Green is each year’s frost-free stretch; the lines are the typical dates.'),
+    h('div', { class: 'tl yrs' }, seasonAxis(south, null), seasonLayer(south, anc, null), rows),
+  );
+}
+
+function noFrostPlanting(sum) {
+  const cool = coolMonths(sum.monthly);
+  const link = id => { const j = jobFor(id); return j ? h('a', { href: `#/job/${id}` }, j.name) : ''; };
+  return h('section', { class: 'plan' },
+    h('h3', { class: 'sec' }, 'Planting without frost dates'),
+    h('div', { class: 'day' },
+      h('p', {}, sum.regime === 'none' ? 'With no frost to wait for, heat is the limit here, not cold. ' : 'Frost is too rare here to hang a calendar on. ',
+        'Tender plants like tomatoes, peppers and basil can go out whenever the nights are mild, and they struggle through the hottest weeks.'),
+      cool.length > 0 && h('p', {}, 'Cool-season crops (lettuce, peas, broccoli, carrots, cilantro) do best in the cooler months, about ',
+        h('b', {}, `${fmt.month(cool[0])} to ${fmt.month(cool.at(-1))}`), ' here.'),
+      h('p', {}, 'For the lawn, crabgrass preventer and seeding go by soil temperature, which ', link('preemergent'), ' and ', link('seed-warm'), ' keep an eye on.')),
+  );
+}
+
+function frostMethod(entry, sum) {
+  const T = fmt.temp(0), TH = fmt.temp(HARD);
+  const elev = entry.elevation == null ? null : state.units === 'metric' ? `${Math.round(entry.elevation)} m` : `${Math.round(entry.elevation / 0.3048).toLocaleString(locale)} ft`;
+  const tenth = Math.max(1, Math.round(sum.n / 10));
+  return h('section', { class: 'method' },
+    h('h3', { class: 'sec' }, 'How these dates are worked out'),
+    h('p', {}, `Good Day For downloads the daily low for every day from ${fmt.fullDate(entry.start)} to ${fmt.fullDate(entry.end)} from `,
+      h('a', { href: 'https://open-meteo.com/en/docs/historical-weather-api', target: '_blank', rel: 'noopener' }, 'Open-Meteo’s weather archive'),
+      `. For each year it finds the last night in spring and the first night in fall that got down to ${T}, and the same for a hard freeze at ${TH}. “Typical” is the middle year: half were earlier and half later. “1 year in 10” is a date only about ${tenth} of the ${sum.n} years went past.`),
+    h('p', {}, 'The history is a weather model re-run over the past (reanalysis) on a grid roughly 10 to 25 km (6 to 15 miles) across, not a thermometer in your yard. Cold air sinks and pools on still nights, so low spots and valleys frost later in spring and earlier in fall than this says, while slopes, towns and gardens near big water stay a little warmer.',
+      elev ? ` The grid point sits ${elev} above sea level; if you’re much higher, expect frost more often.` : ''),
+    h('p', {}, `It’s also the air about 2 m (6 ft) up, not the ground. On a clear, calm night the grass can frost while the air is still a few degrees above freezing, so cover tender plants when the forecast low is around ${fmt.temp(2)}. Good Day For warns you about frost in the week ahead.`),
+    h('p', { class: 'muted small' }, 'The planting times are common extension-service advice, counted from the typical dates; your seed packet knows its own variety. The history is worked out once a year and kept in this browser.'),
+  );
+}
+
+// On a job's page: when the planting calendar says it's in season here.
+function seasonLine(job) {
+  if (!state.place || !CROPS.some(c => c.job === job.id)) return null;
+  const entry = frostFor(state.place);
+  const anc = entry && anchors(summarize(entry));
+  if (!anc) return null;
+  const todayD = placeToday();
+  const w = seasonFor(job.id, anc, entry.south, todayD);
+  if (!w) return null;
+  const text = w.start <= todayD ? `In season here now, through ${fmt.monthDay(w.end)}` : `In season here ${fmt.monthDay(w.start)} – ${fmt.monthDay(w.end)}`;
+  return h('p', { class: 'season' }, h('span', { 'aria-hidden': 'true' }, '📅 '), `${text}, going by your typical frost dates. The hours below say which days actually work. `, h('a', { href: '#/frost' }, 'Planting calendar'));
 }
 
 // ——— Rule editor ———
@@ -871,7 +1487,7 @@ function settingsView() {
     h('section', {},
       h('h3', { class: 'sec' }, 'Start over'),
       h('button', { class: 'btn ghost danger', onclick: () => {
-        if (!confirm('Clear your place, list, schedule and edited rules?')) return;
+        if (!confirm('Clear your place, list, schedule, edited rules, saved measurements and frost dates?')) return;
         store.clearAll();
         location.hash = '#/';
         location.reload();

@@ -18,6 +18,8 @@ export function makeFmt(units = 'us', locale = globalThis.navigator?.language ||
   const wdF = f({ weekday: 'short' }), weekdayF = f({ weekday: 'long' });
   const dateF = f({ weekday: 'short', month: 'short', day: 'numeric' });
   const monthDayF = f({ month: 'short', day: 'numeric' });
+  const fullDateF = f({ month: 'short', day: 'numeric', year: 'numeric' });
+  const monthF = f({ month: 'short' }), monthNarrowF = f({ month: 'narrow' });
   const u = kind => unitFor(kind, units);
   const T = u('temp'), dT = u('tempDelta'), W = u('wind'), R = u('rain');
 
@@ -40,6 +42,9 @@ export function makeFmt(units = 'us', locale = globalThis.navigator?.language ||
     weekday: t => weekdayF.format(asDate(t)),
     date: t => dateF.format(asDate(t)),
     monthDay: t => monthDayF.format(asDate(t)),
+    fullDate: t => fullDateF.format(asDate(t)),
+    month: m => monthF.format(new Date(Date.UTC(2000, m - 1, 1))),
+    monthNarrow: m => monthNarrowF.format(new Date(Date.UTC(2000, m - 1, 1))),
     dayHour: t => `${wdF.format(asDate(t))} ${hourF.format(asDate(t))}`,
     shortHour: h => (h12 ? `${h % 12 || 12}${h < 12 ? 'a' : 'p'}` : `${h}`),
   };

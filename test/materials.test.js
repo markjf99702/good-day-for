@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   rectArea, circleArea, areaOf, roomArea, houseArea, woodArea, volumeOf, postVolume, coatsNeed, withExtra, roundUp,
-  bestPacks, packLabel, currencyFor, moneyFmt, CALCS, calcById, inputsFor, quote, summaryOf, applyRoute, GRASSES,
+  bestPacks, packLabel, currencyFor, moneyFmt, CALCS, calcById, jobsOf, inputsFor, quote, summaryOf, applyRoute, GRASSES,
 } from '../js/materials.js';
 import { JOBS } from '../js/jobs.js';
 
@@ -142,9 +142,12 @@ test('prices show in the local currency, or as a plain number when unsure', () =
   assert.equal(currencyFor('en-GB'), 'GBP');
   assert.equal(currencyFor('de-DE'), 'EUR');
   assert.equal(currencyFor('fr'), null);
-  assert.equal(moneyFmt('en-US')(126), '$126.00');
+  assert.equal(moneyFmt('en-US')(126), '$126');
+  assert.equal(moneyFmt('en-US')(4.25), '$4.25');
+  assert.equal(moneyFmt('en-US')(4.2), '$4.20');
   assert.equal(moneyFmt('en-US').symbol, '$');
   assert.equal(moneyFmt('fr')(12.5).replace(/\s/g, ' '), '12,50');
+  assert.equal(moneyFmt('fr')(12), '12');
 });
 
 // ——— Whole calculators, from saved (metric) measurements to what to buy ———
@@ -241,6 +244,10 @@ test('from a job: warm-season seed switches the grass, the right variant opens',
   assert.deepEqual(applyRoute(seed, 'cool', { c: { '': { grass: 'bermuda' } } }), { choices: { grass: 'mix' } });
   assert.deepEqual(applyRoute(calcById('fill'), 'compost'), { v: 'compost' });
   assert.deepEqual(applyRoute(calcById('fill'), 'nonsense'), {});
+  // …and back the other way, the calculator links to the jobs it goes with.
+  assert.deepEqual(jobsOf(calcById('paint'), 'interior'), []);
+  assert.deepEqual(jobsOf(calcById('feed'), 'preventer'), ['preemergent']);
+  assert.deepEqual(jobsOf(calcById('stain'), ''), ['deck-stain']);
   // Every job that links here points at a real calculator and variant.
   for (const job of JOBS.filter(j => j.buy)) {
     const [id, word] = job.buy.split('/');

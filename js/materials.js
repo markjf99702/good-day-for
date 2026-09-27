@@ -161,15 +161,18 @@ export function currencyFor(locale = 'en-US') {
 
 export function moneyFmt(locale = 'en-US') {
   const cur = currencyFor(locale);
-  let f;
-  try {
-    f = cur ? new Intl.NumberFormat(locale, { style: 'currency', currency: cur, currencyDisplay: 'narrowSymbol' })
-      : new Intl.NumberFormat(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  } catch {
-    f = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  }
-  const symbol = cur ? (f.formatToParts(0).find(p => p.type === 'currency')?.value || '') : '';
-  const money = x => f.format(x);
+  // Cents only when there are some: "$110" but "$4.25".
+  const make = digits => {
+    try {
+      return cur ? new Intl.NumberFormat(locale, { style: 'currency', currency: cur, currencyDisplay: 'narrowSymbol', minimumFractionDigits: digits, maximumFractionDigits: digits })
+        : new Intl.NumberFormat(locale, { minimumFractionDigits: digits, maximumFractionDigits: digits });
+    } catch {
+      return new Intl.NumberFormat('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+    }
+  };
+  const whole = make(0), cents = make(2);
+  const symbol = cur ? (cents.formatToParts(0).find(p => p.type === 'currency')?.value || '') : '';
+  const money = x => (Math.abs(Math.round(x * 100) % 100) === 0 ? whole : cents).format(x);
   money.symbol = symbol;
   return money;
 }
@@ -248,7 +251,7 @@ function bags(units, unit, list) {
 }
 
 const PAINT = {
-  id: 'paint', icon: '🖌️', name: 'Paint & primer', jobs: ['ext-paint'],
+  id: 'paint', icon: '🖌️', name: 'Paint & primer', jobs: v => (v === 'interior' ? [] : ['ext-paint']),
   about: 'Outside walls or a room, less doors and windows, for as many coats as the label says.',
   variants: [['exterior', 'Outside'], ['interior', 'Inside']],
   measure(v, units) {
@@ -265,7 +268,7 @@ const PAINT = {
     }
     const walls = m => m.mode !== 'area';
     return [
-      { key: 'mode', type: 'choice', label: 'Measure', options: [['walls', 'The walls'], ['area', 'I know the area']], def: 'walls' },
+      { key: 'mode', type: 'choice', label: 'Go by', options: [['walls', 'Walls and gables'], ['area', 'An area I already know']], def: 'walls' },
       { key: 'perim', kind: 'len', label: 'Distance around the house', hint: 'Pace it off, or add up the wall lengths.', when: walls },
       { key: 'h', kind: 'len', label: 'Wall height, ground to eaves', when: walls },
       { key: 'gables', kind: 'count', label: 'Gable ends', hint: 'The triangles of wall under a pitched roof.', when: walls },
@@ -360,7 +363,7 @@ const STAIN = {
       { type: 'head', label: 'Fence' },
       { key: 'fl', kind: 'len', label: 'Fence length' },
       { key: 'fh', kind: 'len', label: 'Fence height' },
-      { key: 'sides', type: 'choice', label: 'Staining', options: [['2', 'Both sides'], ['1', 'One side']], def: '2' },
+      { key: 'sides', type: 'choice', label: 'Fence sides to stain', options: [['2', 'Both'], ['1', 'One']], def: '2' },
     ];
   },
   figures(v, units) {
@@ -502,7 +505,7 @@ const SEED = {
 };
 
 const FEED = {
-  id: 'feed', icon: '🌾', name: 'Fertilizer & crabgrass preventer', jobs: ['fertilize', 'preemergent'],
+  id: 'feed', icon: '🌾', name: 'Fertilizer & crabgrass preventer', jobs: v => [v === 'preventer' ? 'preemergent' : 'fertilize'],
   about: 'Bags are sold by how much lawn they cover at the spreader setting on the label.',
   variants: [['fertilizer', 'Fertilizer'], ['preventer', 'Crabgrass preventer']],
   measure: () => areaFields(['rect', 'area'], 'Lawn'),
@@ -549,7 +552,7 @@ const FILLS = {
 };
 
 const FILL = {
-  id: 'fill', icon: '🪴', name: 'Mulch, soil, compost & gravel', jobs: ['plant-trees', 'transplant'],
+  id: 'fill', icon: '🪴', name: 'Mulch, soil, compost & gravel', jobs: v => ({ mulch: ['plant-trees'], compost: ['transplant'] })[v] || [],
   about: 'Area times depth, turned into bags or a loose load.',
   variants: Object.entries(FILLS).map(([k, x]) => [k, x.name]),
   measure(v, units) {
@@ -661,6 +664,8 @@ const CONCRETE = {
 
 export const CALCS = [PAINT, STAIN, SEALER, SEED, FEED, FILL, CONCRETE];
 export const calcById = id => CALCS.find(c => c.id === id);
+// The jobs a calculator (and variant) goes with, for "Good day for it?" links.
+export const jobsOf = (calc, v) => (typeof calc.jobs === 'function' ? calc.jobs(v) : calc.jobs || []);
 export const firstVariant = calc => (calc.variants ? calc.variants[0][0] : '');
 
 // What a route's extra word means for a calculator, e.g. #/buy/seed/warm or
@@ -692,7 +697,9 @@ export function inputsFor(calc, units, saved = {}) {
   for (const fd of measure) {
     const raw = saved.m?.[fd.key];
     if (fd.type === 'choice' || fd.type === 'check') m[fd.key] = raw ?? fd.def;
-    else m[fd.key] = raw != null && raw !== '' ? measureFor(fd.kind, sys).to(raw) : fd.def ? fd.def[i] : null;
+    // Never typed: the default. Typed and then cleared: nothing.
+    else if (raw === undefined) m[fd.key] = fd.def ? fd.def[i] : null;
+    else m[fd.key] = raw === null || raw === '' ? null : measureFor(fd.kind, sys).to(raw);
   }
   const choices = { ...(saved.c?.[''] || {}), ...(saved.c?.[v] || {}) };
   const stored = saved.f?.[sys]?.[v] || {};

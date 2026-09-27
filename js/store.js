@@ -6,6 +6,7 @@ import { guessUnits } from './units.js';
 
 const KEY = 'gooddayfor:v1';
 const FC_KEY = 'gooddayfor:forecast';
+const FROST_KEY = 'gooddayfor:frost';
 
 export const SCHEDULES = {
   any: { name: 'Any time', note: 'Daylight is still up to each job.' },
@@ -36,6 +37,8 @@ export function defaults() {
     picks: [...DEFAULT_PICKS],
     edits: {},
     custom: {},
+    calc: {},     // "How much to buy": what's typed into each calculator
+    saved: [],    // …and measurements saved by name
     seen: false,
   };
 }
@@ -66,6 +69,26 @@ export function saveForecast(fc) {
   try { localStorage.setItem(FC_KEY, JSON.stringify(fc)); } catch { /* fine */ }
 }
 
+// Frost dates, per place. They only change once a year, so a few places are
+// kept (the sums, not the 30 years of data behind them).
+export function loadFrost(key) {
+  try {
+    const all = JSON.parse(localStorage.getItem(FROST_KEY) || '[]');
+    return (Array.isArray(all) ? all : []).find(e => e && e.key === key) || null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveFrost(entry) {
+  try {
+    let all = JSON.parse(localStorage.getItem(FROST_KEY) || '[]');
+    if (!Array.isArray(all)) all = [];
+    all = [entry, ...all.filter(e => e && e.key !== entry.key)].slice(0, 5);
+    localStorage.setItem(FROST_KEY, JSON.stringify(all));
+  } catch { /* fine */ }
+}
+
 export function clearAll() {
-  try { localStorage.removeItem(KEY); localStorage.removeItem(FC_KEY); } catch { /* fine */ }
+  try { [KEY, FC_KEY, FROST_KEY].forEach(k => localStorage.removeItem(k)); } catch { /* fine */ }
 }
