@@ -279,7 +279,8 @@ test('mulch: area × depth to cubic feet, bags and a loose load', () => {
   const ring = answer('fill', { v: 'compost', m: { shape: 'circle', d: ft(6), 'depth-compost': inch(2) } });
   close(ring.q.parts[0].need, 9 * Math.PI * 2 / 12 * 1.05);
   const gravel = answer('fill', { v: 'gravel', m: { l: ft(30), w: ft(3) } });
-  assert.match(gravel.q.parts[0].headline, /0.5 cu ft bags/);
+  assert.match(gravel.q.parts[0].headline, /^\d+ × 0.5 cu ft bags$/, 'big gravel bags aren’t priced, so they’re left out');
+  assert.equal(gravel.inputs.packs.bags.length, 3);
   assert.ok(gravel.q.steps.some(([k]) => k === 'Weight'));
   assert.match(gravel.q.tips[0], /bags to haul/);
 });

@@ -9,7 +9,8 @@
 // The page stores measurements metric (like everything else in the app) and
 // converts them on the way in. Figures, container sizes and prices are kept
 // per unit system instead, because a gallon can and a 2.5 L tin are different
-// things on the shelf.
+// things on the shelf. A price of null means "not usually sold": the size is
+// listed, but left out until you give it a price.
 
 import { measureFor } from './units.js';
 
@@ -548,7 +549,7 @@ const FILLS = {
   mulch: { name: 'Mulch', depth: [3, 7.5], extra: [5, 'It settles a little.'], hint: ['2 to 3 inches keeps weeds down without smothering roots.', '5 to 8 cm keeps weeds down without smothering roots.'], us: [[2, 4.5], [1.5, 3.75], [0.5, 2]], metric: [[25, 3], [50, 5], [70, 7]], bulk: [38, 50] },
   topsoil: { name: 'Topsoil', depth: [4, 10], extra: [10, 'Loose soil settles.'], hint: ['About 4 inches for a new bed or to fill a low spot.', 'About 10 cm for a new bed or to fill a low spot.'], us: [[2, 5.5], [1.5, 4.25], [0.5, 2.25]], metric: [[25, 3], [50, 5]], bulk: [35, 45] },
   compost: { name: 'Compost', depth: [2, 5], extra: [5, 'It settles a little.'], hint: ['2 inches to dig into a bed, ¼ inch to top-dress a lawn.', '5 cm to dig into a bed, 1 cm to top-dress a lawn.'], us: [[2, 9], [1.5, 7], [0.5, 3.5]], metric: [[25, 4], [50, 7], [70, 9]], bulk: [45, 60] },
-  gravel: { name: 'Gravel', depth: [3, 7.5], extra: [5, 'For a base that packs down.'], hint: ['2 to 3 inches for a path, 4 or more for a driveway.', '5 to 8 cm for a path, 10 or more for a driveway.'], us: [[0.5, 5.5]], metric: [[15, 5]], bulk: [55, 70] },
+  gravel: { name: 'Gravel', depth: [3, 7.5], extra: [5, 'For a base that packs down.'], hint: ['2 to 3 inches for a path, 4 or more for a driveway.', '5 to 8 cm for a path, 10 or more for a driveway.'], us: [[2, null], [1.5, null], [0.5, 5.5]], metric: [[15, 5], [25, null]], bulk: [55, 70] },
 };
 
 const FILL = {

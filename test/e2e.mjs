@@ -225,7 +225,7 @@ try {
   assert.equal(await page.getByLabel('Stain covers').inputValue(), '250');
   // A size the store doesn't sell is left out.
   await page.getByLabel('Gallon: price').fill('');
-  assert.doesNotMatch(await page.locator('.buy-list').textContent(), /gallons?\b(?!.*pail)/);
+  await page.locator('.buy-list').getByText('8 quarts').waitFor();
   await page.getByLabel('Gallon: price').fill('45');
   await snap(page, '14-calc-stain', false);
   // Save it by name, and it's listed on the How much to buy page.

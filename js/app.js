@@ -918,7 +918,7 @@ function checkRow(id, label, checked, onChange) {
 function priceInput(id, price, symbol, label, onChange) {
   return h('span', { class: 'num pk-price' },
     symbol && h('span', { class: 'unit' }, symbol),
-    h('input', { id, type: 'number', inputmode: 'decimal', min: 0, step: 'any', value: price == null ? '' : shown(price), placeholder: 'none', 'aria-label': label,
+    h('input', { id, type: 'number', inputmode: 'decimal', min: 0, step: 'any', value: price == null ? '' : shown(price), placeholder: '–', 'aria-label': label,
       oninput: e => onChange(e.target.value === '' ? null : Math.max(0, +e.target.value)) }));
 }
 
@@ -1046,6 +1046,7 @@ function frostBody(entry, current) {
       h('h2', {}, 'Frost dates'),
       h('p', { class: 'muted' },
         sum.n ? `From ${sum.n} years of weather history for this spot, ${years}.` : 'From the weather history for this spot.',
+        sum.skipped > 0 && ` ${sum.skipped} ${sum.skipped === 1 ? 'year was' : 'years were'} left out for missing data.`,
         !current && (frostBusy ? ' Adding last year…' : frostErr ? ` Couldn’t add last year: ${frostErr}` : ''))),
     frostStats(sum, md),
     anc && thisWeekPlan(anc, south, todayD),
