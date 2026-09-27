@@ -109,7 +109,7 @@ button, input, select { font: inherit; color: inherit; }
 .gear:hover { background: var(--surface-2); }
 
 main { width: 100%; max-width: 1100px; margin: 0 auto; padding: 1rem 16px 2rem; flex: 1; outline: none; }
-.foot { text-align: center; color: var(--ink-2); font-size: .8rem; padding: 1rem 16px 2rem; }
+.foot { text-align: center; color: var(--ink-2); font-size: .8rem; padding: 1rem 16px calc(2rem + env(safe-area-inset-bottom)); }
 .foot a { color: inherit; }
 .noscript { text-align: center; padding: 2rem; }
 
