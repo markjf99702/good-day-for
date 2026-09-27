@@ -105,3 +105,79 @@ export function makeForecast({ now = Date.now(), tz = 'America/New_York', scenar
     hourly_units: {}, hourly: H, daily_units: {}, daily,
   };
 }
+
+// ——— Weather history (Open-Meteo's archive API) ———
+//
+// A made-up archive response: daily lows between two dates, with the frost
+// dates you ask for. `dates(y)` gives the season starting in year y as
+//   { lf, lh, ff, fh }: 'MM-DD' or null for "never got that cold"
+// (last spring frost, last spring hard freeze, first fall frost, first fall
+// hard freeze). Seasons run Jan–Dec in the north and Jul–Jun in the south,
+// where spring dates fall July–January and fall dates February–June.
+
+const DAY = 864e5;
+const isoDay = t => new Date(t).toISOString().slice(0, 10);
+const utc = d => Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10));
+
+// A believable spread of dates around a typical one, the same every run.
+const wobble = (y, k, spread) => (((y * k) % (2 * spread + 1)) + 2 * spread + 1) % (2 * spread + 1) - spread;
+const shift = (md, days) => isoDay(utc(`2001-${md}`) + days * DAY).slice(5);
+
+export const NORTH_FROST = y => {
+  const lf = shift('04-16', wobble(y, 37, 11)), ff = shift('10-30', wobble(y, 53, 12));
+  return { lf, lh: shift(lf, -(8 + (y % 7))), ff, fh: shift(ff, 8 + (y % 9)) };
+};
+export const SOUTH_FROST = y => {
+  const lf = shift('09-28', wobble(y, 37, 11)), ff = shift('05-02', wobble(y, 53, 12));
+  return { lf, lh: shift(lf, -(8 + (y % 7))), ff, fh: shift(ff, 8 + (y % 9)) };
+};
+export const NO_FROST = () => ({ lf: null, lh: null, ff: null, fh: null });
+
+export function makeArchive({ start, end, lat = 39.96, lon = -83.0, tz = 'America/New_York', dates, mean = 7, amp = 11, missing = () => false } = {}) {
+  const south = lat < 0;
+  dates = dates || (south ? SOUTH_FROST : NORTH_FROST);
+  const cache = new Map();
+  // A season's dates as full ISO dates.
+  const season = y => {
+    if (!cache.has(y)) {
+      const d = dates(y) || {};
+      const spring = md => (md ? `${south && +md.slice(0, 2) < 7 ? y + 1 : y}-${md}` : null);
+      const fall = md => (md ? `${south ? y + 1 : y}-${md}` : null);
+      cache.set(y, { lf: spring(d.lf), lh: spring(d.lh), ff: fall(d.ff), fh: fall(d.fh) });
+    }
+    return cache.get(y);
+  };
+  const time = [], low = [];
+  for (let t = utc(start); t <= utc(end); t += DAY) {
+    const d = isoDay(t);
+    const y0 = +d.slice(0, 4), m = +d.slice(5, 7);
+    const y = south && m < 7 ? y0 - 1 : y0;
+    const spring = south ? m >= 7 || m < 2 : m < 8;
+    const doy = (t - Date.UTC(y0, 0, 1)) / DAY;
+    const noise = ((Math.sin(t / DAY * 12.9898) * 43758.5453) % 1) * 5;
+    let x = mean - amp * Math.cos(2 * Math.PI * (doy - (south ? 201 : 20)) / 365.25) + noise;
+    const s = season(y);
+    const [lastF, lastH, firstF, firstH] = spring ? [s.lf, s.lh, null, null] : [null, null, s.ff, s.fh];
+    if (spring) {
+      if (!lastF) x = Math.max(x, 1.5);
+      else if (d > lastF) x = Math.max(x, 1.2);
+      else if (d === lastF) x = lastH === lastF ? -3 : -0.6;
+      else if (!lastH || d > lastH) x = Math.max(x, -1.5);
+      else if (d === lastH) x = -3;
+    } else {
+      if (!firstF) x = Math.max(x, 1.5);
+      else if (d < firstF) x = Math.max(x, 1.2);
+      else if (d === firstF) x = firstH === firstF ? -3 : -0.6;
+      else if (!firstH || d < firstH) x = Math.max(x, -1.5);
+      else if (d === firstH) x = -3;
+    }
+    time.push(d);
+    low.push(missing(d) ? null : +x.toFixed(1));
+  }
+  return {
+    latitude: lat, longitude: lon, generationtime_ms: 40.2, utc_offset_seconds: south ? 36000 : -14400,
+    timezone: tz, timezone_abbreviation: 'GMT', elevation: 231,
+    daily_units: { time: 'iso8601', temperature_2m_min: '°C' },
+    daily: { time, temperature_2m_min: low },
+  };
+}

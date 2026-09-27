@@ -1,6 +1,7 @@
-// Forecasts and place search from Open-Meteo (free, no key, CC BY 4.0).
+// Forecasts, weather history and place search from Open-Meteo (free, no key, CC BY 4.0).
 
 const FORECAST = 'https://api.open-meteo.com/v1/forecast';
+const ARCHIVE = 'https://archive-api.open-meteo.com/v1/archive';
 const GEOCODE = 'https://geocoding-api.open-meteo.com/v1/search';
 const REVERSE = 'https://api.bigdatacloud.net/data/reverse-geocode-client';
 
@@ -57,6 +58,28 @@ export async function fetchForecast(place, { signal } = {}) {
   const raw = await res.json();
   if (!raw.hourly?.time?.length) throw new Error('The weather service sent back an empty forecast.');
   return { ...normalize(raw), fetchedAt: Date.now(), key: placeKey(place) };
+}
+
+// Decades of daily lows, for the frost dates. It's about 11,000 numbers and
+// only changes once a year, so the page asks for it once and keeps the sums.
+export function historyUrl(lat, lon, start, end) {
+  const q = new URLSearchParams({
+    latitude: lat.toFixed(4), longitude: lon.toFixed(4),
+    start_date: start, end_date: end, daily: 'temperature_2m_min', timezone: 'auto',
+  });
+  return `${ARCHIVE}?${q}`;
+}
+
+export async function fetchHistory(place, range, { signal } = {}) {
+  const res = await fetch(historyUrl(place.lat, place.lon, range.start, range.end), { signal });
+  if (!res.ok) {
+    let reason = '';
+    try { reason = (await res.json()).reason || ''; } catch { /* not JSON */ }
+    throw new Error(`The weather history service said no (${res.status}${reason ? `: ${reason}` : ''}).`);
+  }
+  const raw = await res.json();
+  if (!raw.daily?.time?.length) throw new Error('The weather history service sent back nothing for this spot.');
+  return raw;
 }
 
 export const placeKey = p => `${p.lat.toFixed(3)},${p.lon.toFixed(3)}`;
