@@ -9,7 +9,9 @@ import { execSync } from 'node:child_process';
 import { join, extname, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
-import { makeForecast } from './fixture.js';
+import { makeForecast, makeArchive, NO_FROST } from './fixture.js';
+import { historyRange, frostEntry, summarize, monthDayOf } from '../js/frost.js';
+import { calendar } from '../js/planting.js';
 
 const require = createRequire(import.meta.url);
 let pw;
@@ -41,14 +43,27 @@ const places = JSON.stringify({ results: [
 
 const browser = await pw.chromium.launch();
 const problems = [];
+const cors = { 'access-control-allow-origin': '*' };
 
-async function newPage(opts = {}) {
+// Weather history: a made-up archive for whatever years the page asks for.
+// `archive` tweaks the fixture; `fail` answers like Open-Meteo does when it's had enough.
+let historyAsks = 0;
+async function newPage(opts = {}, { archive = {}, fail = false } = {}) {
   const context = await browser.newContext({ locale: 'en-US', timezoneId: 'America/New_York', viewport: { width: 1180, height: 900 }, ...opts });
-  await context.route('https://api.open-meteo.com/**', r => r.fulfill({ contentType: 'application/json', body: forecast, headers: { 'access-control-allow-origin': '*' } }));
-  await context.route('https://geocoding-api.open-meteo.com/**', r => r.fulfill({ contentType: 'application/json', body: places, headers: { 'access-control-allow-origin': '*' } }));
+  await context.route('https://api.open-meteo.com/**', r => r.fulfill({ contentType: 'application/json', body: forecast, headers: cors }));
+  await context.route('https://geocoding-api.open-meteo.com/**', r => r.fulfill({ contentType: 'application/json', body: places, headers: cors }));
+  await context.route('https://archive-api.open-meteo.com/**', r => {
+    historyAsks++;
+    if (fail) return r.fulfill({ status: 429, contentType: 'application/json', body: JSON.stringify({ error: true, reason: 'Daily API request limit exceeded. Please try again tomorrow.' }), headers: cors });
+    const q = new URL(r.request().url()).searchParams;
+    const lat = +q.get('latitude');
+    const body = makeArchive({ start: q.get('start_date'), end: q.get('end_date'), lat, lon: +q.get('longitude'), tz: lat < 0 ? 'Australia/Sydney' : 'America/New_York', ...archive });
+    r.fulfill({ contentType: 'application/json', body: JSON.stringify(body), headers: cors });
+  });
   const page = await context.newPage();
   page.on('pageerror', e => problems.push(`pageerror: ${e.message}`));
-  page.on('console', m => { if (m.type() === 'error') problems.push(`console: ${m.text()}`); });
+  // The refusal test's 429 is on purpose; the browser logs it anyway.
+  page.on('console', m => { if (m.type() === 'error' && !(fail && / 429 /.test(m.text()))) problems.push(`console: ${m.text()}`); });
   return { context, page };
 }
 // Hour labels that are showing, per grid: how many, and how many run into the next one.
@@ -73,6 +88,23 @@ const labels = (page, sel) => page.evaluate(sel => {
 }, sel);
 
 const snap = async (page, name, full = true) => { if (shots) await page.screenshot({ path: join(shots, `${name}.png`), fullPage: full }); };
+const sideways = page => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+const setPlace = async (page, place, units = 'us') => {
+  await page.evaluate(([p, u]) => localStorage.setItem('gooddayfor:v1', JSON.stringify({ place: p, units: u })), [place, units]);
+  await page.reload();
+};
+const COLUMBUS = { name: 'Columbus', admin: 'Ohio', country: 'United States', lat: 39.96, lon: -83 };
+const CANBERRA = { name: 'Canberra', admin: 'Australian Capital Territory', country: 'Australia', lat: -35.28, lon: 149.13 };
+
+// What the frost page should say, worked out here from the same fixture.
+const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date());
+function expectedFrost(lat, archive = {}) {
+  const range = historyRange(today, lat);
+  const raw = makeArchive({ start: range.start, end: range.end, lat, ...archive });
+  const sum = summarize(frostEntry(raw, 'x', range));
+  const md = i => new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }).format(new Date(`2000-${monthDayOf(i, sum.south)}T00:00Z`));
+  return { range, sum, last: md(sum.frost.last.median), p90: md(sum.frost.last.p90), first: md(sum.frost.first.median) };
+}
 
 try {
   // ——— First visit: pick a place ———
@@ -169,6 +201,104 @@ try {
   await page.goto(base + '#/');
   assert.equal(await page.locator('.cards .card:not(.add)').count(), 11);
 
+  // ——— How much to buy: from a job's page ———
+  await page.goto(base + '#/job/deck-stain');
+  await page.getByRole('link', { name: 'How much to buy' }).click();
+  await page.getByRole('heading', { name: 'Deck & fence stain' }).waitFor();
+  assert.match(page.url(), /#\/buy\/stain$/);
+  assert.match(await page.locator('.calc-out').textContent(), /Put in the size of the deck or fence/);
+  await page.getByLabel('Deck length').fill('12');
+  await page.getByLabel('Deck width').fill('16');
+  await page.getByLabel('Railing, total length').fill('40');
+  // 192 + 240 sq ft, one coat at 250 sq ft a gallon, +10%: 1.9 gallons.
+  await page.locator('.buy-list').getByText('2 gallons').waitFor();
+  assert.match(await page.locator('.calc-out .total').textContent(), /\$90\b/);
+  assert.match(await page.locator('.steps').textContent(), /40 ft × 6 sq ft per ft = 240 sq ft/);
+  // Thirstier wood: coverage drops to 175, and three gallons beat two and three quarts.
+  await page.getByLabel('The wood').selectOption('weathered');
+  assert.equal(await page.getByLabel('Stain covers').inputValue(), '175');
+  await page.locator('.buy-list').getByText('3 gallons').waitFor();
+  // Your own label figure wins, and can go back to the typical one.
+  await page.getByLabel('Stain covers').fill('100');
+  await page.locator('.buy-list').getByText('five-gallon pail').waitFor();
+  await page.getByLabel('The wood').selectOption('new');
+  assert.equal(await page.getByLabel('Stain covers').inputValue(), '250');
+  // A size the store doesn't sell is left out.
+  await page.getByLabel('Gallon: price').fill('');
+  assert.doesNotMatch(await page.locator('.buy-list').textContent(), /gallons?\b(?!.*pail)/);
+  await page.getByLabel('Gallon: price').fill('45');
+  await snap(page, '14-calc-stain', false);
+  // Save it by name, and it's listed on the How much to buy page.
+  await page.getByRole('button', { name: 'Save' }).click();
+  await page.getByText('Saved as “Deck: 12×16 plus 40 ft of railing”').waitFor();
+  await page.goto(base + '#/buy');
+  await page.getByRole('heading', { name: 'How much to buy' }).waitFor();
+  assert.equal(await page.locator('nav.tabs a[aria-current="page"]').textContent(), 'How much');
+  const savedRow = page.locator('.saved-list li').first();
+  assert.match(await savedRow.textContent(), /Deck: 12×16 plus 40 ft of railing.*2 gallons.*\$90/);
+  assert.equal(await page.locator('.calcs .card').count(), 7);
+  await snap(page, '15-buy');
+  // Measurements survive a reload.
+  await page.reload();
+  await page.goto(base + '#/buy/stain');
+  assert.equal(await page.getByLabel('Deck length').inputValue(), '12');
+  // Warm-season seed opens the seed calculator on a warm-season grass.
+  await page.goto(base + '#/job/seed-warm');
+  await page.getByRole('link', { name: 'How much to buy' }).click();
+  await page.getByRole('heading', { name: 'Grass seed' }).waitFor();
+  assert.equal(await page.getByLabel('Grass').inputValue(), 'bermuda');
+  // Mulch: area × depth to bags, and a loose load as the other option.
+  await page.goto(base + '#/buy/fill/mulch');
+  await page.getByLabel('Bed length').fill('20');
+  await page.getByLabel('Bed width').fill('5');
+  await page.locator('.buy-list').getByText('13 × 2 cu ft bags').waitFor();
+  assert.match(await page.locator('.bulk').textContent(), /1 cu yd, about \$38/);
+  // Variants are tabs; compost keeps the bed but has its own depth.
+  await page.getByRole('link', { name: 'Compost', exact: true }).click();
+  await page.locator('nav.seg a[aria-current="page"]', { hasText: 'Compost' }).waitFor();
+  assert.equal(await page.getByLabel('Depth').inputValue(), '2');
+  assert.equal(await page.getByLabel('Bed length').inputValue(), '20');
+  // Concrete for eight fence posts.
+  await page.goto(base + '#/buy/concrete/posts');
+  await page.getByLabel('Holes').fill('8');
+  await page.locator('.calc-out .total').getByText('$129.25').waitFor();
+  assert.match(await page.locator('.tips').textContent(), /1,640 lb of bags/);
+
+  // ——— Frost dates and the planting calendar ———
+  const north = expectedFrost(39.96);
+  historyAsks = 0;
+  await page.goto(base + '#/frost');
+  await page.locator('.fstats').waitFor();
+  assert.equal(historyAsks, 1, 'the history is fetched when the page opens');
+  const cardsText = await page.locator('.fs').allTextContents();
+  assert.match(cardsText[0], new RegExp(`Last spring frost${north.last}`));
+  assert.match(cardsText[0], new RegExp(`1 year in 10 it’s later than ${north.p90}\\.`));
+  assert.match(cardsText[1], new RegExp(`First fall frost${north.first}`));
+  assert.match(cardsText[2], new RegExp(`${north.sum.frost.days.median} days`));
+  assert.match(await page.locator('.b-intro').textContent(), new RegExp(`30 years .*${north.range.first}–${north.range.last}`));
+  assert.match(await page.locator('.hard').textContent(), /Hard freeze \(28°F/);
+  assert.equal(await page.locator('button.tl-row').count(), calendar({ L: north.sum.frost.last.median, F: north.sum.frost.first.median }).length);
+  assert.equal(await page.locator('.tl-now').textContent(), 'This week');
+  assert.match(await page.locator('.plan h3').first().textContent(), /What to do this week/);
+  assert.ok(await page.locator('.plan-list li').count() >= 1, 'something to do in the week or coming up');
+  const tomatoes = page.locator('button.tl-row', { hasText: 'Tomatoes' });
+  await tomatoes.click();
+  assert.equal(await tomatoes.getAttribute('aria-expanded'), 'true');
+  assert.match(await page.locator('#tl-tomatoes').textContent(), /Start seeds indoors.*Plant out/);
+  assert.match(await page.locator('.method').textContent(), /not a thermometer in your yard.*low spots and valleys.*not the ground/s);
+  await snap(page, '16-frost');
+  // Kept per place: no second download, even after a reload.
+  await page.reload();
+  await page.locator('.fstats').waitFor();
+  assert.equal(historyAsks, 1, 'cached, not fetched again');
+  const cached = await page.evaluate(() => JSON.parse(localStorage.getItem('gooddayfor:frost')));
+  assert.equal(cached.length, 1);
+  assert.equal(cached[0].key, '39.960,-83.000');
+  assert.ok(JSON.stringify(cached).length < 10000, 'the sums, not the raw history');
+  // The soil jobs know their season.
+  await page.goto(base + '#/job/seed');
+  assert.match(await page.locator('.season').textContent(), /In season here/);
+
   // ——— Settings: metric and a schedule ———
   await page.goto(base + '#/settings');
   await page.getByRole('radio', { name: /Metric/ }).check();
@@ -179,7 +309,46 @@ try {
   assert.ok(await page.locator('.mini i.busy').count() > 0, 'busy hours show up');
   await page.goto(base + '#/job/ext-paint');
   assert.match(await page.locator('.checks').textContent(), /10°C/);
+  // Metric: the saved deck comes back in metres, and tins are in litres.
+  await page.goto(base + '#/buy/stain');
+  assert.equal(await page.getByLabel('Deck length').inputValue(), '3.66');
+  assert.match(await page.locator('.buy-list').textContent(), / L can/);
+  await page.goto(base + '#/frost');
+  await page.locator('.fstats').waitFor();
+  assert.match(await page.locator('.fs').first().textContent(), /Last spring frost/);
+  assert.match(await page.locator('.method').textContent(), /down to 0°C/);
   await context.close();
+
+  // ——— Frost: the southern hemisphere, no frost at all, and a refusal ———
+  const south = expectedFrost(-35.28);
+  const { context: cs, page: ps } = await newPage();
+  await ps.goto(base);
+  await setPlace(ps, CANBERRA, 'metric');
+  await ps.goto(base + '#/frost');
+  await ps.locator('.fstats').waitFor();
+  assert.match(south.last, /^(Sep|Oct) /);
+  assert.match(await ps.locator('.fs').first().textContent(), new RegExp(`Last spring frost${south.last}`));
+  assert.match(await ps.locator('.fs').nth(1).textContent(), /First fall frost(Apr|May) /);
+  assert.match(await ps.locator('.b-intro').textContent(), new RegExp(`${south.range.first}–${String(south.range.first + 1).slice(2)} to`));
+  assert.ok(await ps.locator('.tl-frost').count() >= 2, 'the frost season wraps across the axis');
+  await cs.close();
+
+  const { context: cn, page: pn } = await newPage({}, { archive: { dates: NO_FROST, mean: 14, amp: 5 } });
+  await pn.goto(base);
+  await setPlace(pn, { name: 'Sydney', admin: 'New South Wales', country: 'Australia', lat: -33.87, lon: 151.21 }, 'metric');
+  await pn.goto(base + '#/frost');
+  await pn.getByText('None in 30 years').waitFor();
+  assert.match(await pn.locator('.plan').textContent(), /cooler months, about/);
+  assert.equal(await pn.locator('button.tl-row').count(), 0);
+  await cn.close();
+
+  const { context: cf, page: pf } = await newPage({}, { fail: true });
+  await pf.goto(base);
+  await setPlace(pf, COLUMBUS);
+  await pf.goto(base + '#/frost');
+  await pf.getByRole('alert').filter({ hasText: 'Daily API request limit exceeded' }).waitFor();
+  await pf.getByRole('button', { name: 'Try again' }).waitFor();
+  await cf.close();
 
   // ——— Phone, light and dark ———
   for (const scheme of ['light', 'dark']) {
@@ -218,6 +387,24 @@ try {
     await p2.goto(base + '#/week');
     await p2.locator('.day').first().waitFor();
     await snap(p2, `12-phone-week-${scheme}`, false);
+    // The two new pages fit a phone too.
+    await p2.goto(base + '#/frost');
+    await p2.locator('.fstats').waitFor();
+    assert.ok(await sideways(p2) <= 0, `frost page fits a phone (${await sideways(p2)}px)`);
+    const tabs = await p2.locator('nav.tabs').boundingBox();
+    assert.ok(tabs.x + tabs.width <= 390, 'four tabs fit');
+    await snap(p2, `17-phone-frost-${scheme}`, false);
+    await p2.goto(base + '#/buy/paint/interior');
+    await p2.getByLabel('Room length').fill('12');
+    await p2.getByLabel('Room width').fill('14');
+    await p2.locator('.calc-bar').getByText('2 gallons').waitFor();
+    assert.ok(await sideways(p2) <= 0, `calculator fits a phone (${await sideways(p2)}px)`);
+    await snap(p2, `18-phone-calc-${scheme}`, false);
+    for (const route of ['#/buy', '#/buy/concrete/posts', '#/buy/fill/gravel', '#/buy/seed', '#/buy/feed/preventer', '#/buy/sealer', '#/buy/paint/exterior']) {
+      await p2.goto(base + route);
+      await p2.locator('.calc-out, .calcs').first().waitFor();
+      assert.ok(await sideways(p2) <= 0, `${route} fits a phone (${await sideways(p2)}px)`);
+    }
     await c2.close();
   }
 
