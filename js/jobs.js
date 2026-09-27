@@ -11,6 +11,9 @@
 //         'bonus' – nice when it happens (say, rain to water it in)
 //   why   a short reason, shown under the rule
 //
+// A job can also say which "How much to buy" calculator goes with it:
+//   buy   'calculator' or 'calculator/variant' (see materials.js)
+//
 // Limits follow typical label and extension guidance. They're a starting
 // point: the product you're using wins, and every number can be edited.
 
@@ -51,7 +54,7 @@ export const JOBS = [
     ],
   },
   {
-    id: 'fertilize', group: 'lawn', icon: '🌾', name: 'Fertilize the lawn', hours: 1,
+    id: 'fertilize', group: 'lawn', icon: '🌾', name: 'Fertilize the lawn', hours: 1, buy: 'feed/fertilizer',
     about: 'Granular fertilizer wants a light rain to water it in, not a downpour that washes it into the street.',
     rules: [
       daylight,
@@ -77,7 +80,7 @@ export const JOBS = [
     ],
   },
   {
-    id: 'seed', group: 'lawn', icon: '🌿', name: 'Seed the lawn (cool-season grass)', hours: 2,
+    id: 'seed', group: 'lawn', icon: '🌿', name: 'Seed the lawn (cool-season grass)', hours: 2, buy: 'seed/cool',
     about: 'Fescue, bluegrass and rye sprout best in soil between 50°F and 65°F. Early fall is prime time in most places.',
     rules: [
       daylight,
@@ -89,7 +92,7 @@ export const JOBS = [
     ],
   },
   {
-    id: 'seed-warm', group: 'lawn', icon: '☀️', name: 'Seed the lawn (warm-season grass)', hours: 2,
+    id: 'seed-warm', group: 'lawn', icon: '☀️', name: 'Seed the lawn (warm-season grass)', hours: 2, buy: 'seed/warm',
     about: 'Bermuda, zoysia, centipede and bahia need warm soil, 65°F and up, to sprout. Late spring into early summer.',
     rules: [
       daylight,
@@ -100,7 +103,7 @@ export const JOBS = [
     ],
   },
   {
-    id: 'preemergent', group: 'lawn', icon: '🛡️', name: 'Put down crabgrass preventer (spring)', hours: 1,
+    id: 'preemergent', group: 'lawn', icon: '🛡️', name: 'Put down crabgrass preventer (spring)', hours: 1, buy: 'feed/preventer',
     about: 'Pre-emergent has to go down after the soil reaches about 50°F and before a steady 55–60°F, when crabgrass sprouts.',
     rules: [
       daylight,
@@ -135,7 +138,7 @@ export const JOBS = [
 
   // ——— Garden ———
   {
-    id: 'transplant', group: 'garden', icon: '🍅', name: 'Plant tomatoes, peppers & annuals', hours: 2,
+    id: 'transplant', group: 'garden', icon: '🍅', name: 'Plant tomatoes, peppers & annuals', hours: 2, buy: 'fill/compost',
     about: 'Tender plants go out once the frost is done. Warm-season crops also sulk through nights below 50°F.',
     rules: [
       daylight,
@@ -146,7 +149,7 @@ export const JOBS = [
     ],
   },
   {
-    id: 'plant-trees', group: 'garden', icon: '🌳', name: 'Plant trees & shrubs', hours: 3,
+    id: 'plant-trees', group: 'garden', icon: '🌳', name: 'Plant trees & shrubs', hours: 3, buy: 'fill/mulch',
     about: 'Plant into workable ground on a mild stretch, ideally with rain on the way.',
     rules: [
       daylight,
@@ -179,7 +182,7 @@ export const JOBS = [
 
   // ——— Paint & stain ———
   {
-    id: 'ext-paint', group: 'finish', icon: '🖌️', name: 'Paint the outside of the house', hours: 5,
+    id: 'ext-paint', group: 'finish', icon: '🖌️', name: 'Paint the outside of the house', hours: 5, buy: 'paint/exterior',
     about: 'Latex paint needs dry surfaces, mild temperatures while it cures overnight, and no dew settling on it before it sets.',
     rules: [
       daylight,
@@ -194,7 +197,7 @@ export const JOBS = [
     ],
   },
   {
-    id: 'deck-stain', group: 'finish', icon: '🪵', name: 'Stain or seal the deck or fence', hours: 4,
+    id: 'deck-stain', group: 'finish', icon: '🪵', name: 'Stain or seal the deck or fence', hours: 4, buy: 'stain',
     about: 'The wood has to be dry going in, and the stain needs a mild, dry stretch to soak in and cure.',
     rules: [
       daylight,
@@ -236,7 +239,7 @@ export const JOBS = [
 
   // ——— Driveway, concrete & floors ———
   {
-    id: 'sealcoat', group: 'hard', icon: '🛣️', name: 'Seal the driveway', hours: 3,
+    id: 'sealcoat', group: 'hard', icon: '🛣️', name: 'Seal the driveway', hours: 3, buy: 'sealer',
     about: 'Asphalt sealer needs dry pavement, 50°F and up for a full day, and a dry day to cure.',
     rules: [
       daylight,
@@ -249,7 +252,7 @@ export const JOBS = [
     ],
   },
   {
-    id: 'concrete', group: 'hard', icon: '🧱', name: 'Pour concrete', hours: 4,
+    id: 'concrete', group: 'hard', icon: '🧱', name: 'Pour concrete', hours: 4, buy: 'concrete',
     about: 'For footings, pads and post holes. Fresh concrete can’t freeze, bakes and cracks in heat, and gets pitted by rain.',
     rules: [
       daylight,

@@ -21,6 +21,20 @@ export function unitFor(kind, units) {
   return { to: v => round(to(v)), from, label, step };
 }
 
+// Measurements for "How much to buy", also stored metric: lengths in metres,
+// short lengths (depths, hole sizes) in centimetres, areas in square metres.
+const MEASURES = {
+  len: { us: [m => m / 0.3048, ft => ft * 0.3048, 'ft'], metric: [m => m, m => m, 'm'] },
+  small: { us: [cm => cm / 2.54, i => i * 2.54, 'in'], metric: [cm => cm, cm => cm, 'cm'] },
+  area: { us: [m2 => m2 / 0.09290304, f => f * 0.09290304, 'sq ft'], metric: [m2 => m2, m2 => m2, 'm²'] },
+  count: { us: [x => x, x => x, ''], metric: [x => x, x => x, ''] },
+};
+
+export function measureFor(kind, units) {
+  const [to, from, label] = MEASURES[kind][units === 'metric' ? 'metric' : 'us'];
+  return { to, from, label };
+}
+
 export function guessUnits(lang = globalThis.navigator?.language || 'en-US') {
   return /-(US|LR|MM)$/i.test(lang) || lang === 'en' ? 'us' : 'metric';
 }
