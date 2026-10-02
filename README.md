@@ -1,6 +1,6 @@
 # Good Day For
 
-**Use it: [junkdrawer.works/good-day-for](https://junkdrawer.works/good-day-for/)**
+**Use it: [good-day-for.junkdrawer.works](https://good-day-for.junkdrawer.works/)**
 
 **Is it a good day to stain the deck?** Weather apps tell you the weather. What you actually want to know is whether you can do the job. Every outdoor job has its own rules, and most of them reach past today:
 
