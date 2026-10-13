@@ -547,7 +547,8 @@ function detailView(job, startArg) {
       h('div', { class: 'd-actions' },
         buyLink(job) && h('a', { class: 'btn ghost buy-link', href: `#/buy/${buyLink(job)}` }, h('span', { 'aria-hidden': 'true' }, '🧮'), 'How much to buy'),
         h('a', { class: 'btn ghost', href: `#/edit/${encodeURIComponent(job.id)}` }, 'Edit rules'),
-        h('button', { class: 'btn ghost', onclick: () => copyJob(job) }, 'Make a copy'),
+        // Once only: a double tap would otherwise make two copies before the editor opens.
+        h('button', { class: 'btn ghost', onclick: e => { e.currentTarget.disabled = true; copyJob(job); } }, 'Make a copy'),
       ),
     ),
     windowsList(job, wins, s => {

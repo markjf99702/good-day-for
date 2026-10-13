@@ -357,6 +357,12 @@ try {
   await page.locator('.fstats').waitFor();
   assert.match(await page.locator('.fs').first().textContent(), /Last spring frost/);
   assert.match(await page.locator('.method').textContent(), /down to 0°C/);
+  // A double tap on Make a copy makes one copy, not two.
+  await page.goto(base + '#/job/mow');
+  await page.getByRole('button', { name: 'Make a copy' }).dblclick();
+  await page.getByRole('heading', { name: 'Edit: Mow the lawn (my version)' }).waitFor();
+  const copies = await page.evaluate(() => Object.values(JSON.parse(localStorage.getItem('gooddayfor:v1')).custom).filter(j => j.name === 'Mow the lawn (my version)').length);
+  assert.equal(copies, 1, 'one copy');
   await context.close();
 
   // ——— Frost: the southern hemisphere, no frost at all, and a refusal ———
