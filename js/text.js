@@ -64,6 +64,14 @@ export function hoursText(h) {
   return `${h} hours`;
 }
 
+// How far ahead the forecast still reaches, for "No window in the next …":
+// "16 days", "1 day", or hours once an old forecast is down to its last day.
+export function aheadText(hours) {
+  const d = Math.floor(hours / 24);
+  if (d >= 1) return d === 1 ? '1 day' : `${d} days`;
+  return hours === 1 ? '1 hour' : `${Math.max(0, hours)} hours`;
+}
+
 // ——— Rules ———
 
 // What each kind of rule is, for the editor. `kind` is the unit of its value.

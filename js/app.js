@@ -2,7 +2,7 @@
 
 import { JOBS, GROUPS, byId } from './jobs.js';
 import { prepare, rateJob, findWindows, blockers, explain, alerts, waterBalance, rangesOn, localHourKey, GO, IFFY, NO, UNKNOWN } from './engine.js';
-import { makeFmt, relDay, ruleText, obsText, blockerText, alertText, RULE_TYPES, WHEN } from './text.js';
+import { makeFmt, relDay, ruleText, obsText, blockerText, alertText, aheadText, RULE_TYPES, WHEN } from './text.js';
 import { unitFor, measureFor } from './units.js';
 import { fetchForecast, fetchHistory, searchPlaces, locate, nameFor, placeKey, placeLabel } from './weather.js';
 import * as store from './store.js';
@@ -72,8 +72,11 @@ function resultFor(job) {
   return r;
 }
 
-const today = () => ctx.date[ctx.i0] || fc.days[0].date;
-const daysLeft = () => Math.floor((ctx.n - ctx.i0) / 24);
+// Today where the place is. A forecast with no hours left can't say, so ask the clock.
+const today = () => ctx.date[ctx.i0] || localHourKey(Date.now(), fc.tz, fc.utcOffset).slice(0, 10);
+// A saved forecast can run out: one fetched 16 days ago has nothing left from now on.
+const hasHours = () => !!ctx && ctx.i0 < ctx.n;
+const ahead = () => aheadText(ctx.n - ctx.i0);
 const isFar = i => i - ctx.i0 >= 7 * 24;
 
 function firstIndexByDate() {
@@ -97,9 +100,11 @@ async function refresh(force = false) {
   const token = ++fetchToken;
   loading = true;
   loadError = '';
-  softRender();
+  // Ask first, then show "Updating…": a page that fails to draw mustn't keep the forecast from coming.
+  const asked = fetchForecast(state.place);
+  try { softRender(); } catch (e) { setTimeout(() => { throw e; }); }
   try {
-    const next = await fetchForecast(state.place);
+    const next = await asked;
     if (token !== fetchToken) return;
     fc = next;
     store.saveForecast(next);
@@ -108,8 +113,9 @@ async function refresh(force = false) {
   } catch (e) {
     if (token !== fetchToken) return;
     loadError = navigator.onLine === false ? 'You’re offline.' : e.message || 'Couldn’t reach the weather service.';
+  } finally {
+    if (token === fetchToken) loading = false;
   }
-  loading = false;
   softRender();
 }
 
@@ -152,7 +158,7 @@ function render() {
   else if (view === 'jobs') node = catalogView();
   else if (view === 'new') node = editorView(null);
   else if (view === 'edit' && jobFor(args[0])) node = editorView(jobFor(args[0]));
-  else if (!fc) node = loadingView();
+  else if (!fc || !hasHours()) node = loadingView();
   else {
     ensureCtx();
     if (view === 'job' && jobFor(args[0])) node = detailView(jobFor(args[0]), args[1]);
@@ -187,12 +193,12 @@ function statusLine() {
   if (loading) bits.push(h('span', { class: 'spin', 'aria-hidden': 'true' }), 'Updating…');
   else if (fc) {
     const mins = Math.round((Date.now() - fc.fetchedAt) / 6e4);
-    bits.push(mins < 1 ? 'Updated just now' : mins < 60 ? `Updated ${mins} min ago` : `Updated ${Math.round(mins / 60)} h ago`);
+    bits.push(mins < 1 ? 'Updated just now' : mins < 60 ? `Updated ${mins} min ago` : mins < 48 * 60 ? `Updated ${Math.round(mins / 60)} h ago` : `Updated ${Math.round(mins / 1440)} days ago`);
   }
   return h('div', { class: 'status' },
     h('span', {}, ...bits),
     !loading && h('button', { class: 'link', onclick: () => refresh(true) }, 'Refresh'),
-    loadError && h('span', { class: 'err', role: 'alert' }, fc ? `Couldn’t update: ${loadError} Showing the last forecast.` : loadError),
+    loadError && h('span', { class: 'err', role: 'alert' }, fc ? `Couldn’t update: ${loadError} ${hasHours() ? 'Showing the last forecast.' : 'The last forecast is too old to use.'}` : loadError),
   );
 }
 
@@ -408,7 +414,7 @@ function jobCard({ job, res, wins }) {
     const why = iffyReason(job, first.best);
     if (why) sub.push(why + '.');
   } else {
-    head = [h('b', {}, `No window in the next ${daysLeft()} days`)];
+    head = [h('b', {}, `No window in the next ${ahead()}`)];
     const bl = blockerList(job, res).slice(0, 3);
     if (bl.length) sub.push(`In the way: ${bl.join(' · ')}`);
     const busyGo = res.findIndex((r, i) => i >= ctx.i0 && r?.cls === 'busy' && r.st === GO);
@@ -560,7 +566,7 @@ function windowsList(job, wins, onPick) {
   if (!list.length) {
     const bl = blockerList(job, resultFor(job).res).slice(0, 3);
     return h('div', { class: 'wins empty' },
-      h('p', {}, h('b', {}, `No window in the next ${daysLeft()} days.`), bl.length ? ` Mostly: ${bl.join(', ').toLowerCase()}.` : ''),
+      h('p', {}, h('b', {}, `No window in the next ${ahead()}.`), bl.length ? ` Mostly: ${bl.join(', ').toLowerCase()}.` : ''),
       h('p', { class: 'sub' }, 'Tap any square below to see exactly which rule rules it out. If your product allows it, you can loosen a rule with “Edit rules”.'),
     );
   }
@@ -1109,7 +1115,7 @@ function frostStats(sum, md) {
 // For a calendar row that matches a job: what the forecast says about it.
 function jobNote(job) {
   const href = `#/job/${encodeURIComponent(job.id)}`;
-  if (!fc || !ctx) return h('a', { class: 'pl-job', href }, `${job.icon} ${job.name}: see which days work`);
+  if (!fc || !hasHours()) return h('a', { class: 'pl-job', href }, `${job.icon} ${job.name}: see which days work`);
   const { res, wins } = resultFor(job);
   const w = wins.find(x => x.quality === 'go') || wins[0];
   let text;
@@ -1118,7 +1124,7 @@ function jobNote(job) {
     text = `${w.quality === 'go' ? '' : 'iffy '}${relDay(ctx.date[a], today(), fmt)}, ${rangeText(a, b)}`;
   } else {
     const bl = blockerList(job, res).slice(0, 2);
-    text = `no window in the next ${daysLeft()} days${bl.length ? ` (${bl.join(', ').toLowerCase()})` : ''}`;
+    text = `no window in the next ${ahead()}${bl.length ? ` (${bl.join(', ').toLowerCase()})` : ''}`;
   }
   const soil = extraLines(job).find(t => t.startsWith('Soil'));
   return h('a', { class: 'pl-job', href }, h('span', { 'aria-hidden': 'true' }, job.icon, ' '), `${job.short}: ${text}.`, soil ? ` ${soil}` : '');
@@ -1566,10 +1572,11 @@ function welcomeView() {
   );
 }
 
+// While there's no forecast to show: none saved yet, or the saved one has run out.
 function loadingView() {
   return h('div', { class: 'loading' },
     loadError
-      ? [h('p', { class: 'err', role: 'alert' }, loadError), h('button', { class: 'btn', onclick: () => refresh(true) }, 'Try again')]
+      ? [h('p', { class: 'err', role: 'alert' }, fc ? `The last forecast is too old to use. ${loadError}` : loadError), h('button', { class: 'btn', onclick: () => refresh(true) }, 'Try again')]
       : [h('span', { class: 'spin', 'aria-hidden': 'true' }), h('p', {}, `Getting the forecast for ${placeLabel(state.place)}…`)],
   );
 }
@@ -1583,12 +1590,13 @@ document.addEventListener('visibilitychange', () => {
 });
 setInterval(() => {
   if (!fc) return;
-  if (localHourKey(Date.now(), fc.tz, fc.utcOffset) !== ctxHour) softRender();
+  // An update draws the page too, so it goes first: a page that won't draw can't hold it up.
   if (Date.now() - fc.fetchedAt > 60 * 60e3 && document.visibilityState === 'visible') refresh(false);
+  else if (localHourKey(Date.now(), fc.tz, fc.utcOffset) !== ctxHour) softRender();
 }, 60e3);
 
-render();
 refresh(false);
+render();
 
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   navigator.serviceWorker.register('sw.js').catch(() => {});

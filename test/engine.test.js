@@ -4,7 +4,7 @@ import { makeForecast } from './fixture.js';
 import { normalize } from '../js/weather.js';
 import { prepare, rateJob, rateStart, findWindows, blockers, check, explain, alerts, waterBalance, rangesOn, GO, IFFY, NO, UNKNOWN } from '../js/engine.js';
 import { JOBS, byId } from '../js/jobs.js';
-import { makeFmt, ruleText, obsText, blockerText, alertText } from '../js/text.js';
+import { makeFmt, ruleText, obsText, blockerText, alertText, aheadText } from '../js/text.js';
 import { fromF, fromIn } from '../js/units.js';
 
 // Pin "now" to 9 AM today at the place so every run sees the same hours.
@@ -216,4 +216,13 @@ test('this-week ranges group by colour within a day', () => {
   const ranges = rangesOn(res, ctx, date);
   assert.ok(ranges.length >= 1);
   for (const r of ranges) assert.ok(r.to >= r.from && ctx.date[r.from] === date);
+});
+
+test('how far ahead the forecast reaches, in words', () => {
+  assert.equal(aheadText(16 * 24), '16 days');
+  assert.equal(aheadText(47), '1 day');
+  assert.equal(aheadText(24), '1 day');
+  assert.equal(aheadText(23), '23 hours');
+  assert.equal(aheadText(1), '1 hour');
+  assert.equal(aheadText(0), '0 hours');
 });

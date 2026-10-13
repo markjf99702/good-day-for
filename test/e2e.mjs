@@ -12,6 +12,7 @@ import assert from 'node:assert/strict';
 import { makeForecast, makeArchive, NO_FROST } from './fixture.js';
 import { historyRange, frostEntry, summarize, monthDayOf } from '../js/frost.js';
 import { calendar } from '../js/planting.js';
+import { normalize, placeKey } from '../js/weather.js';
 
 const require = createRequire(import.meta.url);
 let pw;
@@ -47,12 +48,15 @@ const cors = { 'access-control-allow-origin': '*' };
 
 // Weather history: a made-up archive for whatever years the page asks for.
 // `archive` tweaks the fixture; `fail` answers like Open-Meteo does when it's had enough.
+// `down` lists the services that can't be reached ('forecast', 'search', 'history'), and
+// `weather` gives the forecast to answer with.
 let historyAsks = 0;
-async function newPage(opts = {}, { archive = {}, fail = false } = {}) {
+async function newPage(opts = {}, { archive = {}, fail = false, down = [], weather = () => forecast } = {}) {
   const context = await browser.newContext({ locale: 'en-US', timezoneId: 'America/New_York', viewport: { width: 1180, height: 900 }, ...opts });
-  await context.route('https://api.open-meteo.com/**', r => r.fulfill({ contentType: 'application/json', body: forecast, headers: cors }));
-  await context.route('https://geocoding-api.open-meteo.com/**', r => r.fulfill({ contentType: 'application/json', body: places, headers: cors }));
-  await context.route('https://archive-api.open-meteo.com/**', r => {
+  const route = (url, name, answer) => context.route(url, r => (down.includes(name) ? r.abort('internetdisconnected') : answer(r)));
+  await route('https://api.open-meteo.com/**', 'forecast', r => r.fulfill({ contentType: 'application/json', body: weather(), headers: cors }));
+  await route('https://geocoding-api.open-meteo.com/**', 'search', r => r.fulfill({ contentType: 'application/json', body: places, headers: cors }));
+  await route('https://archive-api.open-meteo.com/**', 'history', r => {
     historyAsks++;
     if (fail) return r.fulfill({ status: 429, contentType: 'application/json', body: JSON.stringify({ error: true, reason: 'Daily API request limit exceeded. Please try again tomorrow.' }), headers: cors });
     const q = new URL(r.request().url()).searchParams;
@@ -62,8 +66,12 @@ async function newPage(opts = {}, { archive = {}, fail = false } = {}) {
   });
   const page = await context.newPage();
   page.on('pageerror', e => problems.push(`pageerror: ${e.message}`));
-  // The refusal test's 429 is on purpose; the browser logs it anyway.
-  page.on('console', m => { if (m.type() === 'error' && !(fail && / 429 /.test(m.text()))) problems.push(`console: ${m.text()}`); });
+  // The refusal test's 429 and the services a test takes away are on purpose; the browser logs them anyway.
+  page.on('console', m => {
+    if (m.type() !== 'error') return;
+    if ((fail && / 429 /.test(m.text())) || (down.length && /ERR_INTERNET_DISCONNECTED/.test(m.text()))) return;
+    problems.push(`console: ${m.text()}`);
+  });
   return { context, page };
 }
 // Hour labels that are showing, per grid: how many, and how many run into the next one.
@@ -95,6 +103,15 @@ const setPlace = async (page, place, units = 'us') => {
 };
 const COLUMBUS = { name: 'Columbus', admin: 'Ohio', country: 'United States', lat: 39.96, lon: -83 };
 const CANBERRA = { name: 'Canberra', admin: 'Australian Capital Territory', country: 'Australia', lat: -35.28, lon: 149.13 };
+// The forecast the page keeps in storage, as if it had been fetched `days` ago.
+const savedForecast = days => {
+  const at = Date.now() - days * 864e5;
+  return { ...normalize(makeForecast({ tz: 'America/New_York', now: at })), fetchedAt: at, key: placeKey(COLUMBUS) };
+};
+const withSaved = (page, fc, settings = {}) => page.evaluate(([s, f]) => {
+  localStorage.setItem('gooddayfor:v1', JSON.stringify(s));
+  localStorage.setItem('gooddayfor:forecast', JSON.stringify(f));
+}, [{ place: COLUMBUS, units: 'us', ...settings }, fc]);
 
 // What the frost page should say, worked out here from the same fixture.
 const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date());
@@ -349,6 +366,44 @@ try {
   await pf.getByRole('alert').filter({ hasText: 'Daily API request limit exceeded' }).waitFor();
   await pf.getByRole('button', { name: 'Try again' }).waitFor();
   await cf.close();
+
+  // ——— An old saved forecast ———
+  // A month old with the weather service out of reach: none of it is ahead of now, so it says so,
+  // even opened straight at a job (a bookmark, or the link in a calendar event).
+  const { context: co, page: po } = await newPage({}, { down: ['forecast'] });
+  await po.goto(base);
+  await withSaved(po, savedForecast(30));
+  await po.goto(base + '#/job/mow');
+  await po.reload();
+  await po.getByRole('alert').filter({ hasText: /^The last forecast is too old to use\. / }).waitFor();
+  await po.getByRole('button', { name: 'Try again' }).waitFor();
+  await po.goto(base + '#/week');
+  assert.equal(await po.locator('.day').count(), 0, 'no days drawn from a month-old forecast');
+  // Planting still goes by today's date, not the forecast's first day.
+  await po.goto(base + '#/frost');
+  const thisWeek = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }).format(new Date(`${today}T00:00Z`));
+  assert.match(await po.locator('.plan h3').first().textContent(), new RegExp(`this week · ${thisWeek} –`));
+  assert.match(await po.locator('.status').textContent(), /Updated 30 days ago/);
+  // Two weeks old: a day or so left, and it counts it in words that fit.
+  await withSaved(po, savedForecast(14));
+  await po.goto(base + '#/');
+  await po.reload();
+  await po.locator('.cards .card').first().waitFor();
+  assert.match(await po.locator('.status').textContent(), /Updated 14 days ago/);
+  const oldHeads = (await po.locator('.cards .next').allTextContents()).join(' | ');
+  assert.ok(!/\b[01] days\b/.test(oldHeads), `days left, in words: ${oldHeads}`);
+  await co.close();
+
+  // Online, a forecast that old is simply replaced, even when the page opens at a job.
+  let asked = 0;
+  const { context: cr, page: pr } = await newPage({}, { weather: () => { asked++; return forecast; } });
+  await pr.goto(base);
+  await withSaved(pr, savedForecast(20));
+  await pr.goto(base + '#/job/mow');
+  await pr.reload();
+  await pr.locator('.inspect').waitFor();
+  assert.ok(asked >= 1, 'it fetched a new forecast');
+  await cr.close();
 
   // ——— Phone, light and dark ———
   for (const scheme of ['light', 'dark']) {
