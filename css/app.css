@@ -30,7 +30,8 @@
   color-scheme: light;
 }
 
-@media (prefers-color-scheme: dark) {
+/* Dark on screen only: paper always gets the light palette. */
+@media screen and (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bg: #121815;
     --surface: #1a221e;
@@ -56,13 +57,15 @@
     color-scheme: dark;
   }
 }
-:root[data-theme="dark"] {
-  --bg: #121815; --surface: #1a221e; --surface-2: #222c27; --ink: #e6ede8; --ink-2: #a2afa7; --line: #2d3832;
-  --accent: #74cf9c; --accent-2: #8ddcb0; --accent-ink: #0d1a13; --go: #3fbf70; --iffy: #e3a52a; --no: #4a3431;
-  --off: #252c30; --past: #181e1b; --unknown: #1d2420; --bad: #f08a74; --warn-bg: #3a2f14; --warn-ink: #f5d38a;
-  --shadow: 0 1px 2px rgba(0, 0, 0, .3); color-scheme: dark;
-  --k-indoors: #8a70e0; --k-sow: #1aa0c0; --k-plant: #56a03e; --k-other: #d4638f;
-  --frost-band: rgba(140, 175, 235, .11); --frost-line: #8fb0e2;
+@media screen {
+  :root[data-theme="dark"] {
+    --bg: #121815; --surface: #1a221e; --surface-2: #222c27; --ink: #e6ede8; --ink-2: #a2afa7; --line: #2d3832;
+    --accent: #74cf9c; --accent-2: #8ddcb0; --accent-ink: #0d1a13; --go: #3fbf70; --iffy: #e3a52a; --no: #4a3431;
+    --off: #252c30; --past: #181e1b; --unknown: #1d2420; --bad: #f08a74; --warn-bg: #3a2f14; --warn-ink: #f5d38a;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .3); color-scheme: dark;
+    --k-indoors: #8a70e0; --k-sow: #1aa0c0; --k-plant: #56a03e; --k-other: #d4638f;
+    --frost-band: rgba(140, 175, 235, .11); --frost-line: #8fb0e2;
+  }
 }
 
 * { box-sizing: border-box; }
@@ -522,3 +525,15 @@ button.tl-row:hover .tl-nm, button.tl-row[aria-expanded="true"] .tl-nm { color: 
 .yrs .tl-name { font-size: .74rem; color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .yrs .tl-track.gap { height: auto; font-size: .72rem; color: var(--ink-2); }
 @media (max-width: 560px) { .tl.yrs { --name: 3.9rem; } }
+
+/* ——— Print ——— */
+/* On paper: what the page says, without its buttons, tabs and footer, and with the hour
+   colours kept even when the browser leaves backgrounds out. */
+@media print {
+  .bar { position: static; background: none; backdrop-filter: none; }
+  .place-btn { border: 0; background: none; padding: 0; }
+  .gear, .tabs, .back, .d-actions, .i-actions, .i-head .btn, .link, .card.add, .saved-chips, .calc-bar, .save-row, .foot { display: none !important; }
+  .g-hours, .calc-out { position: static; max-height: none; overflow: visible; }
+  .card, .day, .win, .fs, .fld, .checks li, .part { break-inside: avoid; }
+  .cell, .mini i, .sw, .dot, .pill, .mark, .chip, .alert, .d-alert, .tl-bar, .tl-frost, .tl-today, .tl-now { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}

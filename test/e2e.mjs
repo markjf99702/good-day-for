@@ -505,6 +505,32 @@ try {
   assert.ok(asked >= 1, 'it fetched a new forecast');
   await cr.close();
 
+  // ——— On paper ———
+  // Printing leaves out what only works on screen, keeps the hour colours, and uses the light
+  // palette even from a phone in dark mode.
+  const { context: cpr, page: ppr } = await newPage({ colorScheme: 'dark' });
+  await ppr.goto(base);
+  await setPlace(ppr, COLUMBUS);
+  await ppr.goto(base + '#/job/deck-stain');
+  await ppr.locator('.cell.go').first().click();
+  await ppr.locator('.i-actions').waitFor();
+  assert.equal(await ppr.evaluate(() => getComputedStyle(document.body).backgroundColor), 'rgb(18, 24, 21)', 'dark on screen');
+  await ppr.emulateMedia({ media: 'print', colorScheme: 'dark' });
+  const paper = await ppr.evaluate(() => {
+    const css = sel => getComputedStyle(document.querySelector(sel));
+    return {
+      shown: ['.foot', '.gear', '.back', '.d-actions', '.i-actions'].filter(sel => css(sel).display !== 'none'),
+      exact: css('.cell.go').printColorAdjust || css('.cell.go').webkitPrintColorAdjust,
+      ink: getComputedStyle(document.body).color,
+      place: css('#placeBtn').display,
+    };
+  });
+  assert.deepEqual(paper.shown, [], 'nothing on paper that only works on screen');
+  assert.equal(paper.exact, 'exact', 'the hour colours print');
+  assert.equal(paper.ink, 'rgb(28, 38, 33)', 'dark ink on paper');
+  assert.notEqual(paper.place, 'none', 'the place is still named');
+  await cpr.close();
+
   // ——— Less motion ———
   // Asked for less motion, tapping a best time jumps to its details instead of gliding there.
   const { context: cm, page: pm } = await newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, reducedMotion: 'reduce' });
