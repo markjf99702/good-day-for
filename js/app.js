@@ -42,6 +42,8 @@ function h(tag, attrs, ...kids) {
 }
 const lower = t => (t ? t[0].toLowerCase() + t.slice(1) : t);
 const sentence = t => (/[.!?]$/.test(t) ? t : `${t}.`);
+// Scroll smoothly, unless the reader has asked their device for less motion.
+const glide = () => (matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth');
 // replaceChildren, but skipping empties and flattening lists the way h() does.
 const put = (el, ...kids) => el.replaceChildren(...kids.flat(Infinity).filter(k => k != null && k !== false).map(k => (k instanceof Node ? k : String(k))));
 const persist = () => store.save(state);
@@ -553,7 +555,7 @@ function detailView(job, startArg) {
     ),
     windowsList(job, wins, s => {
       grid.querySelector(`[data-i="${s}"]`)?.click();
-      inspector.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      inspector.scrollIntoView({ behavior: glide(), block: 'nearest' });
     }),
     h('h3', { class: 'sec' }, 'Hour by hour'),
     legend(),
@@ -806,7 +808,7 @@ function calcBody(calc, saved, draw) {
   const idOf = k => `c-${calc.id}-${k}`.replace(/[^\w-]/g, '_');
 
   const out = h('aside', { class: 'calc-out', 'aria-live': 'polite', 'aria-label': 'What to buy', tabindex: '-1' });
-  const bar = h('button', { class: 'calc-bar', type: 'button', onclick: () => out.scrollIntoView({ behavior: 'smooth', block: 'start' }) });
+  const bar = h('button', { class: 'calc-bar', type: 'button', onclick: () => out.scrollIntoView({ behavior: glide(), block: 'start' }) });
   const update = () => fillAnswer(calc, saved, out, bar, draw);
 
   const measureRows = calc.measure(v, units).map(fd => {

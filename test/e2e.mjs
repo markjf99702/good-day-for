@@ -499,6 +499,18 @@ try {
   assert.ok(asked >= 1, 'it fetched a new forecast');
   await cr.close();
 
+  // ——— Less motion ———
+  // Asked for less motion, tapping a best time jumps to its details instead of gliding there.
+  const { context: cm, page: pm } = await newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, reducedMotion: 'reduce' });
+  await pm.goto(base);
+  await setPlace(pm, COLUMBUS);
+  await pm.goto(base + '#/job/laundry');
+  await pm.locator('.win').first().click();
+  const jumped = await pm.evaluate(() => scrollY);
+  await pm.waitForTimeout(600);
+  assert.ok(jumped > 0 && jumped === await pm.evaluate(() => scrollY), `scrolled straight there (${jumped}, then ${await pm.evaluate(() => scrollY)})`);
+  await cm.close();
+
   // ——— Phone, light and dark ———
   for (const scheme of ['light', 'dark']) {
     const { context: c2, page: p2 } = await newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, colorScheme: scheme, isMobile: true, hasTouch: true });
