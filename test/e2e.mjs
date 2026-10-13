@@ -459,6 +459,29 @@ try {
   await pd.locator('.picker').getByText('You’re offline.').waitFor();
   await cd.close();
 
+  // ——— Saves that aren't the shape the page writes ———
+  // Hand-edited or damaged: each bad field falls back on its own, and the page and Settings still open.
+  const { context: cj, page: pj } = await newPage();
+  await pj.goto(base);
+  const junk = [
+    { schedule: null }, { schedule: { preset: 'custom' } }, { picks: null }, { saved: null, recent: null, calc: null, custom: null },
+    { edits: { mow: { name: 'No rules' } } }, { place: { name: 'Nowhere', lat: 'x', lon: null } },
+  ];
+  for (const bad of junk) {
+    await pj.evaluate(s => { localStorage.clear(); localStorage.setItem('gooddayfor:v1', JSON.stringify(s)); }, { place: COLUMBUS, units: 'us', ...bad });
+    await pj.goto(base + '#/');
+    await pj.reload();
+    await pj.locator('.cards .card, .welcome').first().waitFor();
+    await pj.goto(base + '#/settings');
+    await pj.getByRole('button', { name: 'Clear everything' }).waitFor();
+  }
+  // A kept forecast with no days in it is fetched again instead.
+  await withSaved(pj, { ...savedForecast(0), days: undefined });
+  await pj.goto(base + '#/');
+  await pj.reload();
+  await pj.locator('.cards .card').first().waitFor();
+  await cj.close();
+
   // Online, a forecast that old is simply replaced, even when the page opens at a job.
   let asked = 0;
   const { context: cr, page: pr } = await newPage({}, { weather: () => { asked++; return forecast; } });
