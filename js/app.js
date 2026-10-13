@@ -41,6 +41,7 @@ function h(tag, attrs, ...kids) {
   return el;
 }
 const lower = t => (t ? t[0].toLowerCase() + t.slice(1) : t);
+const sentence = t => (/[.!?]$/.test(t) ? t : `${t}.`);
 // replaceChildren, but skipping empties and flattening lists the way h() does.
 const put = (el, ...kids) => el.replaceChildren(...kids.flat(Infinity).filter(k => k != null && k !== false).map(k => (k instanceof Node ? k : String(k))));
 const persist = () => store.save(state);
@@ -198,7 +199,7 @@ function statusLine() {
   return h('div', { class: 'status' },
     h('span', {}, ...bits),
     !loading && h('button', { class: 'link', onclick: () => refresh(true) }, 'Refresh'),
-    loadError && h('span', { class: 'err', role: 'alert' }, fc ? `Couldn’t update: ${loadError} ${hasHours() ? 'Showing the last forecast.' : 'The last forecast is too old to use.'}` : loadError),
+    loadError && h('span', { class: 'err', role: 'alert' }, fc ? `${sentence(loadError)} ${hasHours() ? 'Showing the last forecast.' : 'The last forecast is too old to use.'}` : loadError),
   );
 }
 
@@ -1522,7 +1523,7 @@ function placePicker() {
       out.replaceChildren(...list.map(p => h('li', {}, h('button', { class: 'result', type: 'button', onclick: () => setPlace(p) },
         h('b', {}, p.name), ' ', h('span', { class: 'muted' }, [p.admin, p.country].filter(Boolean).join(', '))))));
     } catch (e) {
-      if (e.name !== 'AbortError') msg.textContent = e.message;
+      if (e.name !== 'AbortError') msg.textContent = navigator.onLine === false ? 'You’re offline.' : e.message;
     }
   };
   const input = h('input', { type: 'search', placeholder: 'City or ZIP code', autocomplete: 'off', 'aria-label': 'City or ZIP code',
@@ -1578,7 +1579,7 @@ function welcomeView() {
 function loadingView() {
   return h('div', { class: 'loading' },
     loadError
-      ? [h('p', { class: 'err', role: 'alert' }, fc ? `The last forecast is too old to use. ${loadError}` : loadError), h('button', { class: 'btn', onclick: () => refresh(true) }, 'Try again')]
+      ? [h('p', { class: 'err', role: 'alert' }, fc ? `The last forecast is too old to use. ${sentence(loadError)}` : sentence(loadError)), h('button', { class: 'btn', onclick: () => refresh(true) }, 'Try again')]
       : [h('span', { class: 'spin', 'aria-hidden': 'true' }), h('p', {}, `Getting the forecast for ${placeLabel(state.place)}…`)],
   );
 }

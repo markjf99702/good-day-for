@@ -425,6 +425,28 @@ try {
   for (let k = 1; k < 7; k++) assert.ok(!/today/i.test(await wetDays.nth(k).textContent()), `day ${k} doesn't say today`);
   await cw.close();
 
+  // ——— When the services can't be reached ———
+  const { context: cd, page: pd } = await newPage({}, { down: ['forecast', 'search'] });
+  await pd.goto(base);
+  // Place search says which service didn't answer, not the browser's "Failed to fetch".
+  await pd.getByRole('searchbox', { name: 'City or ZIP code' }).fill('Columbus');
+  await pd.locator('.picker').getByText('Couldn’t reach place search.').waitFor();
+  // No forecast yet: the same plain words, with Try again.
+  await setPlace(pd, COLUMBUS);
+  await pd.getByRole('alert').filter({ hasText: /^Couldn’t reach the weather service\.$/ }).waitFor();
+  await pd.getByRole('button', { name: 'Try again' }).waitFor();
+  // A forecast from a few days ago still shows, and the line about it reads as sentences.
+  await withSaved(pd, savedForecast(3));
+  await pd.reload();
+  await pd.locator('.cards .card').first().waitFor();
+  await pd.locator('.status .err').filter({ hasText: /^Couldn’t reach the weather service\. Showing the last forecast\.$/ }).waitFor();
+  // Properly offline, search says that instead.
+  await cd.setOffline(true);
+  await pd.evaluate(() => { location.hash = '#/place'; });
+  await pd.getByRole('searchbox', { name: 'City or ZIP code' }).fill('Dayton');
+  await pd.locator('.picker').getByText('You’re offline.').waitFor();
+  await cd.close();
+
   // Online, a forecast that old is simply replaced, even when the page opens at a job.
   let asked = 0;
   const { context: cr, page: pr } = await newPage({}, { weather: () => { asked++; return forecast; } });

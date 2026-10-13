@@ -48,8 +48,20 @@ export function normalize(raw) {
   };
 }
 
+// fetch, but when the connection itself fails, say which service couldn't be reached
+// rather than passing on the browser's own words ("Failed to fetch", "Load failed").
+// A search that's been called off (AbortError) goes through as it is.
+async function reach(url, signal, what) {
+  try {
+    return await fetch(url, { signal });
+  } catch (e) {
+    if (e instanceof TypeError) throw new Error(`Couldn’t reach ${what}.`);
+    throw e;
+  }
+}
+
 export async function fetchForecast(place, { signal } = {}) {
-  const res = await fetch(forecastUrl(place.lat, place.lon), { signal });
+  const res = await reach(forecastUrl(place.lat, place.lon), signal, 'the weather service');
   if (!res.ok) {
     let reason = '';
     try { reason = (await res.json()).reason || ''; } catch { /* not JSON */ }
@@ -71,7 +83,7 @@ export function historyUrl(lat, lon, start, end) {
 }
 
 export async function fetchHistory(place, range, { signal } = {}) {
-  const res = await fetch(historyUrl(place.lat, place.lon, range.start, range.end), { signal });
+  const res = await reach(historyUrl(place.lat, place.lon, range.start, range.end), signal, 'the weather history service');
   if (!res.ok) {
     let reason = '';
     try { reason = (await res.json()).reason || ''; } catch { /* not JSON */ }
@@ -95,7 +107,7 @@ export async function searchPlaces(query, { signal } = {}) {
   const q = query.trim();
   if (q.length < 2) return [];
   const go = async extra => {
-    const res = await fetch(`${GEOCODE}?${new URLSearchParams({ name: q, count: 8, language: 'en', format: 'json', ...extra })}`, { signal });
+    const res = await reach(`${GEOCODE}?${new URLSearchParams({ name: q, count: 8, language: 'en', format: 'json', ...extra })}`, signal, 'place search');
     if (!res.ok) throw new Error('Place search is not answering right now.');
     return (await res.json()).results || [];
   };
