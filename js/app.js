@@ -410,7 +410,8 @@ function jobCard({ job, res, wins }) {
     if (isFar(a)) sub.push('That’s a long way out, so check again closer to the day.');
     if (first !== go) {
       const [c, d] = rangeOf(first);
-      sub.push(`Iffy sooner: ${lower(dayName(c))}, ${rangeText(c, d)}.`);
+      // "today" and "tomorrow" in lower case, weekdays and dates as they're written.
+      sub.push(`Iffy sooner: ${relDay(ctx.date[c], today(), fmt)}, ${rangeText(c, d)}.`);
     }
     if (go.bonus) sub.push(h('span', { class: 'bonus' }, '★ ', lower(job.rules.find(r => r.lvl === 'bonus')?.why || 'Bonus')));
   } else if (first) {

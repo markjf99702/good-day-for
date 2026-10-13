@@ -426,6 +426,10 @@ try {
   assert.equal(await wetDays.nth(1).locator('.d-none').textContent(), 'Nothing on your list works that day.');
   assert.match(await wetDays.nth(1).locator('.d-no').textContent(), /^Not that day: 🌱 Mow/);
   for (let k = 1; k < 7; k++) assert.ok(!/today/i.test(await wetDays.nth(k).textContent()), `day ${k} doesn't say today`);
+  // Mowing is iffy the day after tomorrow and fine the day after that; the weekday keeps its capital.
+  await pwet.goto(base + '#/');
+  const sooner = await pwet.locator('.card', { hasText: 'Mow the lawn' }).getByText(/^Iffy sooner:/).textContent();
+  assert.match(sooner, /^Iffy sooner: (Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday), start /);
   await cw.close();
 
   // ——— When the services can't be reached ———
