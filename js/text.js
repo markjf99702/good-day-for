@@ -188,7 +188,8 @@ export function obsText(rule, c, ctx, fmt) {
       const sun = d?.sunrise ? `Sun up ${fmt.clock(d.sunrise)} to ${fmt.clock(d.sunset)}` : 'No sunrise data';
       return c.st === NO ? `Runs into the dark. ${sun}` : sun;
     }
-    case 'clock': return c.st === NO ? `Runs past those hours` : 'Fits';
+    // The first hour outside them is the start itself, or a later one when the job overruns.
+    case 'clock': return c.st !== NO ? 'Fits' : c.at === c.span?.[0] ? 'Outside those hours' : 'Runs past those hours';
     case 'dry': {
       if (c.past) return c.total >= RAIN.trace ? `${fmt.rain(c.total)} fell, starting${at(c.traceAt)}` : 'Stayed dry';
       if (c.st === NO) {

@@ -227,6 +227,16 @@ test('rule sentences read naturally in both unit systems', () => {
   assert.equal(ruleText(byId('transplant').rules[1], us), 'At least 36°F while you work and for 7 days after');
 });
 
+test('time of day: a start outside the hours, or one that runs past them', () => {
+  const { ctx } = setup();
+  const fmt = makeFmt('us', 'en-US');
+  const said = (job, s) => { const c = explain(job, ctx, s).find(e => e.rule.t === 'clock'); return obsText(c.rule, c, ctx, fmt); };
+  const water = byId('water'); // 4 to 10 AM is ideal
+  assert.equal(said(water, at(ctx, 1, 23)), 'Outside those hours');
+  assert.equal(said(water, at(ctx, 1, 9)), 'Fits');
+  assert.equal(said({ ...water, hours: 3 }, at(ctx, 1, 9)), 'Runs past those hours');
+});
+
 test('this-week ranges group by colour within a day', () => {
   const { ctx } = setup();
   const res = rateJob(byId('mow'), ctx);
