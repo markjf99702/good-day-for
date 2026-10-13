@@ -2,7 +2,7 @@
 // The page itself keeps the last forecast in localStorage.
 // Network first, so a new version shows up as soon as you're online.
 
-const CACHE = 'gooddayfor-v3';
+const CACHE = 'gooddayfor-v4';
 const SHELL = [
   './', 'index.html', 'carry.js', 'css/app.css', 'icon.svg', 'manifest.webmanifest',
   'js/app.js', 'js/engine.js', 'js/jobs.js', 'js/text.js', 'js/units.js', 'js/weather.js', 'js/store.js', 'js/cal.js',
