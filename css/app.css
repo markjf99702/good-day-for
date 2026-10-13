@@ -527,12 +527,17 @@ button.tl-row:hover .tl-nm, button.tl-row[aria-expanded="true"] .tl-nm { color: 
 @media (max-width: 560px) { .tl.yrs { --name: 3.9rem; } }
 
 /* ——— Print ——— */
-/* On paper: what the page says, without its buttons, tabs and footer, and with the hour
-   colours kept even when the browser leaves backgrounds out. */
+/* On paper: what the page says, without its buttons, tabs and junkdrawer.works links, and with
+   the hour colours kept even when the browser leaves backgrounds out. The weather credit and
+   "your product's label has the final say" still print. */
 @media print {
   .bar { position: static; background: none; backdrop-filter: none; }
   .place-btn { border: 0; background: none; padding: 0; }
-  .gear, .tabs, .back, .d-actions, .i-actions, .i-head .btn, .link, .card.add, .saved-chips, .calc-bar, .save-row, .foot { display: none !important; }
+  .gear, .tabs, .back, .d-actions, .i-actions, .i-head .btn, .link, .card.add, .saved-chips, .calc-bar, .save-row, .jd-foot { display: none !important; }
+  /* The credit goes under the header, where it can't end up alone on a last page. */
+  main { order: 1; padding-bottom: 0; }
+  .foot { padding: .25rem 16px 0; }
+  .foot p { margin: 0; }
   .g-hours, .calc-out { position: static; max-height: none; overflow: visible; }
   .card, .day, .win, .fs, .fld, .checks li, .part { break-inside: avoid; }
   .cell, .mini i, .sw, .dot, .pill, .mark, .chip, .alert, .d-alert, .tl-bar, .tl-frost, .tl-today, .tl-now { -webkit-print-color-adjust: exact; print-color-adjust: exact; }

@@ -517,8 +517,8 @@ try {
   await cr.close();
 
   // ——— On paper ———
-  // Printing leaves out what only works on screen, keeps the hour colours, and uses the light
-  // palette even from a phone in dark mode.
+  // Printing leaves out what only works on screen, keeps the hour colours and the weather credit,
+  // and uses the light palette even from a phone in dark mode.
   const { context: cpr, page: ppr } = await newPage({ colorScheme: 'dark' });
   await ppr.goto(base);
   await setPlace(ppr, COLUMBUS);
@@ -530,16 +530,18 @@ try {
   const paper = await ppr.evaluate(() => {
     const css = sel => getComputedStyle(document.querySelector(sel));
     return {
-      shown: ['.foot', '.gear', '.back', '.d-actions', '.i-actions'].filter(sel => css(sel).display !== 'none'),
+      shown: ['.jd-foot', '.gear', '.back', '.d-actions', '.i-actions'].filter(sel => css(sel).display !== 'none'),
       exact: css('.cell.go').printColorAdjust || css('.cell.go').webkitPrintColorAdjust,
       ink: getComputedStyle(document.body).color,
       place: css('#placeBtn').display,
+      credit: css('.foot').display !== 'none' && document.querySelector('.foot p').textContent,
     };
   });
   assert.deepEqual(paper.shown, [], 'nothing on paper that only works on screen');
   assert.equal(paper.exact, 'exact', 'the hour colours print');
   assert.equal(paper.ink, 'rgb(28, 38, 33)', 'dark ink on paper');
   assert.notEqual(paper.place, 'none', 'the place is still named');
+  assert.match(paper.credit || '', /^Weather from Open-Meteo\.com \(CC BY 4\.0\)\. .*label has the final say\.$/, 'the weather credit prints');
   await cpr.close();
 
   // ——— Less motion ———
