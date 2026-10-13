@@ -120,6 +120,24 @@ test('containers: odd metric sizes and very large orders', () => {
   assert.ok(Date.now() - t < 1500, 'fast enough');
 });
 
+test('containers: a giant size (a slip of extra zeros) answers at once, and wins only when it should', () => {
+  const cans = [{ id: 'c1', size: 1, price: 15 }, { id: 'c2', size: 2.5, price: 32 }, { id: 'c5', size: 5, price: 55 }];
+  const ids = r => r.items.map(x => [x.pack.id, x.n]);
+  const plain = ids(bestPacks(11.2, cans));
+  for (const size of [1e6, 1e8, 1e12]) {
+    const t = Date.now();
+    const r = bestPacks(11.2, [...cans, { id: 'big', size, price: 200 }]);
+    assert.ok(Date.now() - t < 250, `a ${size} L can took ${Date.now() - t} ms`);
+    assert.deepEqual(ids(r), plain, 'too dear to win');
+  }
+  assert.deepEqual(ids(bestPacks(11.2, [...cans, { id: 'big', size: 1e8, price: 20 }])), [['big', 1]], 'cheap enough to win');
+  // With no prices, an exact mix of small ones still beats a giant with lots left over.
+  assert.deepEqual(ids(bestPacks(3, [{ id: 'one', size: 1, price: null }, { id: 'big', size: 1e7, price: null }])), [['one', 3]]);
+  // A huge order whose best value is a huge size still finishes.
+  const huge = bestPacks(8.8e12, [...PAINT, { id: 'tank', size: 1e12, price: 1e9 }]);
+  assert.deepEqual(ids(huge), [['tank', 9]]);
+});
+
 test('concrete bags: mostly 80 lb, topped up with a smaller bag', () => {
   const bagsOf = [{ id: 'b40', w: 40, size: 0.3, price: 4.25 }, { id: 'b60', w: 60, size: 0.45, price: 5.25 }, { id: 'b80', w: 80, size: 0.6, price: 6.25 }];
   const r = bestPacks(11.05, bagsOf);

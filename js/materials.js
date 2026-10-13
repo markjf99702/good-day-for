@@ -97,40 +97,68 @@ export function bestPacks(need, packs) {
   units = units.map(u => u / g);
   const cents = use.map(p => (noPrices ? 0 : Math.round(p.price * 100)));
   let N = Math.ceil(need * 1000 / g - 1e-6);
-  const fixed = new Array(use.length).fill(0);
-  // A huge order: fill most of it with the best-value size, then solve the rest exactly.
+
+  // The best answer so far: cheapest, then least left over, then fewest containers.
+  let best = null;
+  const offer = (n, cost, amount, count) => {
+    if (!best || cost < best.cost || (cost === best.cost && (amount < best.amount || (amount === best.amount && count < best.count)))) best = { n, cost, amount, count };
+  };
+  const none = new Array(use.length).fill(0);
+  const plus = (n, i, k = 1) => n.map((x, j) => (j === i ? x + k : x));
+  if (N <= 0) offer(none, 0, 0, 0);
+  // A size that holds all of it by itself is an answer on its own: anything added to it only
+  // costs more and leaves more over. So only the smaller sizes need mixing, which keeps one
+  // enormous size (a slip of extra zeros, say) from making the sums enormous too.
+  let small = [];
+  units.forEach((u, i) => (u >= N ? offer(plus(none, i), cents[i], u, 1) : small.push(i)));
+  let fixed = none, fixedCost = 0, fixedAmount = 0, fixedCount = 0;
+  // A huge order: fill most of it with the best-value smaller size, then solve the rest exactly.
+  // (Again, if that size is so big that what's left is still huge.)
   const LIMIT = 100000;
-  if (N > LIMIT) {
-    let best = 0;
-    use.forEach((p, i) => {
-      const a = cents[i] / units[i], b = cents[best] / units[best];
-      if (a < b || (a === b && units[i] > units[best])) best = i;
-    });
-    const k = Math.floor((N - LIMIT / 2) / units[best]);
-    fixed[best] = k;
-    N -= k * units[best];
+  while (N > LIMIT && small.length) {
+    let b = small[0];
+    for (const i of small) {
+      const x = cents[i] / units[i], y = cents[b] / units[b];
+      if (x < y || (x === y && units[i] > units[b])) b = i;
+    }
+    const k = Math.max(1, Math.floor((N - LIMIT / 2) / units[b]));
+    fixed = plus(fixed, b, k);
+    fixedCost += k * cents[b];
+    fixedAmount += k * units[b];
+    fixedCount += k;
+    N -= k * units[b];
+    // What's left may fit in one of the bigger sizes now.
+    for (const i of small) if (units[i] >= N) offer(plus(fixed, i), fixedCost + cents[i], fixedAmount + units[i], fixedCount + 1);
+    small = small.filter(i => units[i] < N);
   }
-  const top = N + Math.max(...units);
-  const cost = new Float64Array(top + 1).fill(Infinity);
-  const count = new Int32Array(top + 1);
-  const from = new Int8Array(top + 1).fill(-1);
-  cost[0] = 0;
-  for (let v = 1; v <= top; v++) {
-    for (let i = 0; i < units.length; i++) {
-      const u = units[i];
-      if (u > v || cost[v - u] === Infinity) continue;
-      const c = cost[v - u] + cents[i], k = count[v - u] + 1;
-      if (c < cost[v] || (c === cost[v] && k < count[v])) { cost[v] = c; count[v] = k; from[v] = i; }
+  if (small.length) {
+    // The cheapest way to make up each amount from the smaller sizes, up to N plus the biggest
+    // of them: a mix that goes further has a container in it that isn't needed.
+    const top = N + Math.max(...small.map(i => units[i]));
+    const cost = new Float64Array(top + 1).fill(Infinity);
+    const count = new Int32Array(top + 1);
+    const from = new Int8Array(top + 1).fill(-1);
+    cost[0] = 0;
+    for (let v = 1; v <= top; v++) {
+      for (const i of small) {
+        const u = units[i];
+        if (u > v || cost[v - u] === Infinity) continue;
+        const c = cost[v - u] + cents[i], k = count[v - u] + 1;
+        if (c < cost[v] || (c === cost[v] && k < count[v])) { cost[v] = c; count[v] = k; from[v] = i; }
+      }
+    }
+    let at = -1;
+    for (let v = N; v <= top; v++) {
+      if (cost[v] === Infinity) continue;
+      if (at < 0 || cost[v] < cost[at]) at = v; // on a tie, the smaller amount (less left over) wins
+    }
+    if (at >= 0) {
+      const n = [...fixed];
+      for (let v = at; v > 0; v -= units[from[v]]) n[from[v]]++;
+      offer(n, fixedCost + cost[at], fixedAmount + at, fixedCount + count[at]);
     }
   }
-  let at = -1;
-  for (let v = N; v <= top; v++) {
-    if (cost[v] === Infinity) continue;
-    if (at < 0 || cost[v] < cost[at]) at = v; // on a tie, the smaller amount (less left over) wins
-  }
-  const n = [...fixed];
-  for (let v = at; v > 0; v -= units[from[v]]) n[from[v]]++;
-  const items = use.map((pack, i) => ({ pack, n: n[i] })).filter(x => x.n > 0).sort((a, b) => b.pack.size - a.pack.size);
+  const items = use.map((pack, i) => ({ pack, n: best.n[i] })).filter(x => x.n > 0).sort((a, b) => b.pack.size - a.pack.size);
   const amount = items.reduce((s, x) => s + x.n * x.pack.size, 0);
   const total = items.reduce((s, x) => s + x.n * (noPrices ? 0 : x.pack.price), 0);
   return { items, amount, cost: noPrices ? null : Math.round(total * 100) / 100, left: Math.max(0, amount - need) };
