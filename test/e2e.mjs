@@ -37,6 +37,13 @@ await new Promise(r => server.listen(0, r));
 const base = `http://localhost:${server.address().port}/`;
 
 const forecast = JSON.stringify(makeForecast({ tz: 'America/New_York' }));
+// A wet start: rain all day today and tomorrow, a 40% chance the day after, then the usual.
+const allDay = (inches, pop) => Object.fromEntries(Array.from({ length: 24 }, (_, hr) => [hr, [inches, pop]]));
+const wet = JSON.stringify(makeForecast({ tz: 'America/New_York', scenario: {
+  0: { hi: 60, lo: 52, dew: 50, wind: 8, cloud: 100, rain: allDay(0.05, 90) },
+  1: { hi: 61, lo: 52, dew: 50, wind: 8, cloud: 100, rain: allDay(0.05, 90) },
+  2: { hi: 64, lo: 50, dew: 48, wind: 6, cloud: 70, pop: 40 },
+} }));
 const places = JSON.stringify({ results: [
   { name: 'Columbus', admin1: 'Ohio', country: 'United States', country_code: 'US', latitude: 39.96, longitude: -83.0 },
   { name: 'Columbus', admin1: 'Georgia', country: 'United States', country_code: 'US', latitude: 32.46, longitude: -84.99 },
@@ -401,6 +408,22 @@ try {
   const oldHeads = (await po.locator('.cards .next').allTextContents()).join(' | ');
   assert.ok(!/\b[01] days\b/.test(oldHeads), `days left, in words: ${oldHeads}`);
   await co.close();
+
+  // ——— A wet start to the week ———
+  const { context: cw, page: pwet } = await newPage({}, { weather: () => wet });
+  await pwet.goto(base);
+  await pwet.evaluate(p => localStorage.setItem('gooddayfor:v1', JSON.stringify({ place: p, units: 'us', picks: ['mow', 'laundry', 'car'] })), COLUMBUS);
+  await pwet.goto(base + '#/week');
+  await pwet.reload();
+  const wetDays = pwet.locator('.day');
+  await wetDays.first().waitFor();
+  // Nothing works today or tomorrow, and each day says which day it means.
+  assert.equal(await wetDays.nth(0).locator('.d-none').textContent(), 'Nothing on your list works today.');
+  assert.match(await wetDays.nth(0).locator('.d-no').textContent(), /^Not today: /);
+  assert.equal(await wetDays.nth(1).locator('.d-none').textContent(), 'Nothing on your list works that day.');
+  assert.match(await wetDays.nth(1).locator('.d-no').textContent(), /^Not that day: 🌱 Mow/);
+  for (let k = 1; k < 7; k++) assert.ok(!/today/i.test(await wetDays.nth(k).textContent()), `day ${k} doesn't say today`);
+  await cw.close();
 
   // Online, a forecast that old is simply replaced, even when the page opens at a job.
   let asked = 0;

@@ -456,6 +456,7 @@ function weekTab(list) {
     }
     yes.sort((x, y) => (x.cls === y.cls ? x.start - y.start : x.cls === 'go' ? -1 : 1));
     const dayAlerts = al.filter(x => x.date === date);
+    const isToday = date === today();
     return h('section', { class: 'day' },
       h('header', {},
         h('h3', {}, relDay(date, today(), fmt, { cap: true })),
@@ -471,8 +472,8 @@ function weekTab(list) {
             h('span', { class: 'nm' }, y.job.name),
             h('span', { class: 't' }, y.cls === 'iffy' ? 'Iffy, ' : '', y.ranges.map(r => (r.from === r.to ? fmt.hour(fc.time[r.from]) : `${fmt.hour(fc.time[r.from])} – ${fmt.hour(fc.time[r.to])}`)).join(', ')),
           ))))
-        : h('p', { class: 'd-none' }, a >= b ? 'The day’s done.' : 'Nothing on your list works today.'),
-      no.length > 0 && a < b && h('p', { class: 'd-no' }, h('span', {}, 'Not today: '),
+        : h('p', { class: 'd-none' }, a >= b ? 'The day’s done.' : isToday ? 'Nothing on your list works today.' : 'Nothing on your list works that day.'),
+      no.length > 0 && a < b && h('p', { class: 'd-no' }, h('span', {}, isToday ? 'Not today: ' : 'Not that day: '),
         no.map((n, k) => [k ? ' · ' : '', h('span', { title: n.job.name }, n.job.icon, ' ', n.job.short || n.job.name, n.why ? ` (${lower(n.why)})` : '')])),
     );
   }));
