@@ -241,12 +241,16 @@ export function check(rule, ctx, s, W) {
   }
 }
 
-// Is the whole job inside the hours you said you're free?
+// Is the whole job inside the hours you said you're free? A day's hours can run
+// past midnight ("9 PM to 5 AM"); the part after midnight is the next morning.
 function free(ctx, s, W) {
   if (!ctx.avail) return true;
   for (let i = s; i < s + W; i++) {
-    const r = ctx.avail[ctx.wday[i]];
-    if (!r || ctx.hour[i] < r[0] || ctx.hour[i] >= r[1]) return false;
+    const hr = ctx.hour[i];
+    const day = ctx.avail[ctx.wday[i]], before = ctx.avail[(ctx.wday[i] + 6) % 7];
+    const inDay = !!day && (day[0] < day[1] ? hr >= day[0] && hr < day[1] : day[0] > day[1] && hr >= day[0]);
+    const lateNight = !!before && before[0] > before[1] && hr < before[1];
+    if (!inDay && !lateNight) return false;
   }
   return true;
 }

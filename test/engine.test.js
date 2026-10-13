@@ -130,6 +130,24 @@ test('schedule: busy hours are marked busy unless the job runs itself', () => {
   assert.notEqual(rateStart(water, ctx, s).cls, 'busy');
 });
 
+test('schedule: free hours can run past midnight, into the next morning', () => {
+  const { ctx } = setup();
+  const job = { hours: 1, rules: [{ t: 'tempMin', v: -40 }] }; // any weather will do
+  const night = Array(7).fill(null);
+  night[ctx.wday[at(ctx, 1, 22)]] = [21, 5]; // tomorrow, 9 PM to 5 AM
+  ctx.avail = night;
+  const busy = (day, hour, hours = 1) => rateStart({ ...job, hours }, ctx, at(ctx, day, hour)).cls === 'busy';
+  assert.equal(busy(1, 22), false, '10 PM is free');
+  assert.equal(busy(2, 3), false, 'so is 3 AM the next morning');
+  assert.equal(busy(2, 4, 2), true, 'but a job from 4 AM runs past 5');
+  assert.equal(busy(1, 3), true, '3 AM tomorrow belongs to tonight, which isn’t free');
+  assert.equal(busy(1, 12), true);
+  assert.equal(busy(2, 22), true, 'the next evening isn’t free');
+  // From and to the same hour is never free, as before.
+  night[ctx.wday[at(ctx, 1, 22)]] = [9, 9];
+  assert.equal(busy(1, 9), true);
+});
+
 test('lawn water balance: rain refills, sunny days draw down', () => {
   const { ctx } = setup();
   const now = waterBalance(ctx);
