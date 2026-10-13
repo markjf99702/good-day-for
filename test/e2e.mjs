@@ -53,6 +53,8 @@ const browser = await pw.chromium.launch();
 const problems = [];
 const cors = { 'access-control-allow-origin': '*' };
 
+const stays = (url, site) => url.startsWith(site) || /^https:\/\/(api|geocoding-api|archive-api)\.open-meteo\.com\//.test(url) || /^(blob|data):/.test(url);
+
 // Weather history: a made-up archive for whatever years the page asks for.
 // `archive` tweaks the fixture; `fail` answers like Open-Meteo does when it's had enough.
 // `down` lists the services that can't be reached ('forecast', 'search', 'history'), and
@@ -73,6 +75,8 @@ async function newPage(opts = {}, { archive = {}, fail = false, down = [], weath
   });
   const page = await context.newPage();
   page.on('pageerror', e => problems.push(`pageerror: ${e.message}`));
+  // Nothing leaves the site except for the weather services, which the tests answer.
+  page.on('request', r => { if (!stays(r.url(), base)) problems.push(`left the site: ${r.url()}`); });
   // The refusal test's 429 and the services a test takes away are on purpose; the browser logs them anyway.
   page.on('console', m => {
     if (m.type() !== 'error') return;
@@ -600,6 +604,37 @@ try {
     }
     await c2.close();
   }
+
+  // ——— Offline, at its own address ———
+  // The service worker only runs on https, so the real address is answered from these files.
+  // carry.js would fetch saves from junkdrawer.works on a first visit there; there are none to bring.
+  const SITE = 'https://good-day-for.junkdrawer.works/';
+  let offline = false;
+  const cx = await browser.newContext({ locale: 'en-US', timezoneId: 'America/New_York', viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+  await cx.addInitScript(() => { try { localStorage.setItem('junkdrawer.carried', 'test'); } catch { /* fine */ } });
+  await cx.route(`${SITE}**`, async r => {
+    if (offline) return r.abort('internetdisconnected');
+    const path = decodeURIComponent(new URL(r.request().url()).pathname);
+    try { await r.fulfill({ body: await readFile(join(root, path.endsWith('/') ? path + 'index.html' : path)), contentType: TYPES[extname(path) || '.html'] }); }
+    catch { await r.fulfill({ status: 404, body: 'not found' }); }
+  });
+  await cx.route('https://api.open-meteo.com/**', r => (offline ? r.abort('internetdisconnected') : r.fulfill({ contentType: 'application/json', body: forecast, headers: cors })));
+  const px = await cx.newPage();
+  px.on('pageerror', e => problems.push(`pageerror (at its own address): ${e.message}`));
+  px.on('request', r => { if (!stays(r.url(), SITE)) problems.push(`left the site: ${r.url()}`); });
+  await px.goto(SITE);
+  await px.evaluate(p => localStorage.setItem('gooddayfor:v1', JSON.stringify({ place: p, units: 'us' })), COLUMBUS);
+  await px.reload();
+  await px.locator('.cards .card').first().waitFor();
+  await px.waitForFunction(() => navigator.serviceWorker?.controller, null, { timeout: 20000 });
+  offline = true;
+  await cx.setOffline(true);
+  await px.reload();
+  await px.locator('.cards .card').first().waitFor();
+  assert.equal(await px.locator('.cards .card:not(.add)').count(), 9, 'the job list opens offline');
+  await px.goto(SITE + '#/job/mow');
+  await px.locator('.inspect').waitFor();
+  await cx.close();
 
   assert.deepEqual(problems, [], 'no errors in the page');
   console.log('e2e: all good');
