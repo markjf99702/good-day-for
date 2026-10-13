@@ -237,6 +237,21 @@ test('time of day: a start outside the hours, or one that runs past them', () =>
   assert.equal(said({ ...water, hours: 3 }, at(ctx, 1, 9)), 'Runs past those hours');
 });
 
+test('rain totals for a stretch that’s already over say what fell', () => {
+  const { fc, ctx } = setup();
+  const fmt = makeFmt('us', 'en-US');
+  fc.precip[at(ctx, -1, 10)] = fromIn(0.7); // yesterday morning
+  const said = (rule, s) => obsText(rule, check(rule, ctx, s, 2), ctx, fmt);
+  const soggy = { t: 'rainMax', v: fromIn(1), when: 'before', h: 24 };
+  const soft = { t: 'rainMin', v: fromIn(0.25), when: 'before', h: 72 };
+  assert.equal(said(soggy, ctx.i0), 'About 0.7 in fell');
+  assert.equal(said(soft, ctx.i0), 'About 0.7 in fell');
+  assert.equal(said({ ...soggy, h: 3 }, ctx.i0), 'None fell');
+  // Still to come, it's what's expected.
+  assert.equal(said({ t: 'rainMax', v: fromIn(1), when: 'after', h: 30 }, at(ctx, 1, 10)), 'About 0.4 in expected');
+  assert.equal(said({ t: 'rainMax', v: fromIn(1), when: 'after', h: 3 }, at(ctx, 1, 10)), 'None expected');
+});
+
 test('this-week ranges group by colour within a day', () => {
   const { ctx } = setup();
   const res = rateJob(byId('mow'), ctx);

@@ -219,7 +219,7 @@ export function check(rule, ctx, s, W) {
         if (p > peak) { peak = p; peakAt = i; }
       }
       const st = rule.t === 'rainMax' ? above(v, rule.v, rule.v * (1 - MARGIN.rain)) : v >= rule.v ? GO : NO;
-      return { st, v, at: peakAt };
+      return { st, v, at: peakAt, past: b <= ctx.i0 };
     }
 
     case 'soil': {

@@ -215,7 +215,10 @@ export function obsText(rule, c, ctx, fmt) {
     case 'cloudMax': return `Averages ${Math.round(v)}% cloud cover`;
     case 'vpdMin': return `${dryLevel(v)[0].toUpperCase() + dryLevel(v).slice(1)} drying air (${v.toFixed(2)} kPa on average)`;
     case 'rainMax':
-    case 'rainMin': return v < 0.1 ? 'None expected' : `About ${fmt.rain(v)} expected`;
+    case 'rainMin':
+      // A stretch that's already over: what fell, not what's expected.
+      if (c.past) return v < 0.1 ? 'None fell' : `About ${fmt.rain(v)} fell`;
+      return v < 0.1 ? 'None expected' : `About ${fmt.rain(v)} expected`;
     case 'soil': return `Averages ${fmt.temp(v)} that day`;
     case 'thirsty': return c.st === NO ? `Only ${fmt.rain(v)} short` : `${fmt.rain(v)} short of a full ${fmt.rain(LAWN.cap)}`;
     default: return '';
