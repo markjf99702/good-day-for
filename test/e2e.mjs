@@ -86,25 +86,32 @@ async function newPage(opts = {}, { archive = {}, fail = false, down = [], weath
   return { context, page };
 }
 // Hour labels that are showing, per grid: how many, and how many run into the next one.
-const labels = (page, sel) => page.evaluate(sel => {
-  const rows = new Map();
-  for (const lab of document.querySelectorAll(sel)) {
-    if (getComputedStyle(lab).visibility === 'hidden') continue;
-    const text = [...lab.children].find(c => getComputedStyle(c).display !== 'none');
-    const r = text.getBoundingClientRect();
-    if (!r.width) continue;
-    if (!rows.has(lab.parentElement)) rows.set(lab.parentElement, []);
-    rows.get(lab.parentElement).push({ left: r.left, right: r.right, text: text.textContent });
-  }
-  let shown = 0, overlaps = 0, min = Infinity;
-  for (const list of rows.values()) {
-    list.sort((a, b) => a.left - b.left);
-    shown += list.length;
-    min = Math.min(min, list.length);
-    for (let i = 1; i < list.length; i++) if (list[i].left < list[i - 1].right + 1) overlaps++;
-  }
-  return { grids: rows.size, shown, overlaps, min, sample: [...rows.values()][0]?.map(x => x.text) };
-}, sel);
+// The labels are fitted once each grid has been laid out, which can lag on a busy machine.
+const labels = async (page, sel) => {
+  await page.waitForFunction(sel => {
+    const all = [...document.querySelectorAll(sel)];
+    return all.length > 0 && all.every(l => l.closest('[data-fit]'));
+  }, sel);
+  return page.evaluate(sel => {
+    const rows = new Map();
+    for (const lab of document.querySelectorAll(sel)) {
+      if (getComputedStyle(lab).visibility === 'hidden') continue;
+      const text = [...lab.children].find(c => getComputedStyle(c).display !== 'none');
+      const r = text.getBoundingClientRect();
+      if (!r.width) continue;
+      if (!rows.has(lab.parentElement)) rows.set(lab.parentElement, []);
+      rows.get(lab.parentElement).push({ left: r.left, right: r.right, text: text.textContent });
+    }
+    let shown = 0, overlaps = 0, min = Infinity;
+    for (const list of rows.values()) {
+      list.sort((a, b) => a.left - b.left);
+      shown += list.length;
+      min = Math.min(min, list.length);
+      for (let i = 1; i < list.length; i++) if (list[i].left < list[i - 1].right + 1) overlaps++;
+    }
+    return { grids: rows.size, shown, overlaps, min, sample: [...rows.values()][0]?.map(x => x.text) };
+  }, sel);
+};
 
 const snap = async (page, name, full = true) => { if (shots) await page.screenshot({ path: join(shots, `${name}.png`), fullPage: full }); };
 const sideways = page => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
