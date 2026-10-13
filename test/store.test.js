@@ -27,6 +27,24 @@ test('saves the page wrote come back exactly as they were', () => {
   assert.deepEqual(store.load(), JSON.parse(JSON.stringify(state)));
 });
 
+test('a browser without something the checks use still gets every save back', () => {
+  const state = {
+    ...store.defaults(), place: COLUMBUS, picks: ['mow', 'my-1'], custom: { 'my-1': MINE },
+    schedule: { preset: 'evenings', days: [[8, 20], [21, 5], [17, 21], [17, 21], [17, 21], [17, 21], [8, 20]] },
+    saved: [{ calc: 'stain', name: 'Deck', m: { dl: 3.6 }, c: {}, f: {}, at: 1 }],
+  };
+  store.save(state);
+  const kept = ['hasOwn', 'fromEntries'].map(k => [k, Object.getOwnPropertyDescriptor(Object, k)]);
+  try {
+    delete Object.hasOwn; // Safari before 15.4
+    assert.deepEqual(store.load(), JSON.parse(JSON.stringify(state)));
+    delete Object.fromEntries; // older still: the checks can't run, so the saves come back unchecked
+    assert.deepEqual(store.load(), JSON.parse(JSON.stringify(state)));
+  } finally {
+    for (const [k, d] of kept) Object.defineProperty(Object, k, d);
+  }
+});
+
 test('a wrong-typed field goes back to its default, and the rest survives', () => {
   put('gooddayfor:v1', {
     place: COLUMBUS, units: 'metric', schedule: null, picks: null, recent: null, saved: null, calc: null, custom: null,

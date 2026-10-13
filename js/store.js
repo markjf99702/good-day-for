@@ -44,11 +44,19 @@ export function defaults() {
 }
 
 export function load() {
+  let saved;
   try {
-    const saved = JSON.parse(localStorage.getItem(KEY) || 'null');
-    return isObj(saved) ? checked(saved) : defaults();
+    saved = JSON.parse(localStorage.getItem(KEY) || 'null');
   } catch {
     return defaults();
+  }
+  if (!isObj(saved)) return defaults();
+  // If the checks themselves can't run (a browser missing something they use), take the
+  // saves as they are: starting over here would write the defaults over them on the next change.
+  try {
+    return checked(saved);
+  } catch {
+    return { ...defaults(), ...saved };
   }
 }
 
@@ -71,7 +79,7 @@ const isHours = r => Array.isArray(r) && r.length === 2 && r.every(x => Number.i
 
 function asSchedule(x, def) {
   if (!isObj(x)) return def;
-  const preset = Object.hasOwn(SCHEDULES, x.preset) ? x.preset : def.preset;
+  const preset = Object.keys(SCHEDULES).includes(x.preset) ? x.preset : def.preset;
   // A day with no hours (null) is a day you're not free.
   const days = Array.isArray(x.days) && x.days.length === 7 ? x.days.map((r, k) => (r === null || isHours(r) ? r : def.days[k])) : def.days;
   return { ...x, preset, days };
