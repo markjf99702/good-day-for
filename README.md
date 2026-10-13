@@ -106,12 +106,13 @@ The calendar counts weeks from the typical dates, following common extension-ser
 It's a static site: plain HTML, CSS and JavaScript modules, with no build step.
 
 ```sh
-npx serve .        # or any static file server, then open the printed address
-npm test           # rules engine, wording, calendar export, materials and frost tests (Node 20+)
-node test/e2e.mjs  # drives the real page in Chromium against a sample forecast and history (needs Playwright)
+npx serve .                 # or any static file server, then open the printed address
+npm test                    # rules engine, wording, calendar export, materials, frost, saves and weather-service tests (Node 20+)
+node test/e2e.mjs           # drives the real page in Chromium against a sample forecast and history, offline too (needs Playwright)
+node tools/make-icons.mjs   # redraws the PNG icons from icon.svg
 ```
 
-To put it online with GitHub Pages: **Settings → Pages → Build and deployment → Deploy from a branch**, then pick the branch and `/ (root)`.
+To put it online with GitHub Pages: **Settings → Pages → Build and deployment → Deploy from a branch**, then pick `main` and `/ (root)`.
 
 ### Files
 
@@ -124,4 +125,7 @@ To put it online with GitHub Pages: **Settings → Pages → Build and deploymen
 - `js/weather.js`: Open-Meteo forecast, weather history and place search.
 - `js/app.js`: the page.
 - `js/store.js`, `js/cal.js`, `js/units.js`: saved settings and frost dates, calendar export, and unit conversion.
+- `sw.js`: keeps a copy for using offline.
+- `carry.js`: brings saves over from junkdrawer.works/good-day-for/ the first time it opens here.
+- `tools/make-icons.mjs`: redraws the PNG icons from `icon.svg` and `tools/icon-full-bleed.svg`.
 - `test/fixture.js`: a realistic made-up forecast built around today's date, and a made-up weather history with frost dates you choose, used by the tests.
