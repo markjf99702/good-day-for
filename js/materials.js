@@ -234,6 +234,8 @@ function areaSummary(m, U, n) {
 
 const extraFig = (def, hint) => ({ key: 'waste', label: 'Extra', unit: '%', def, step: 5, hint });
 const coatsFig = (def, hint) => ({ key: 'coats', label: 'Coats', unit: '', def, step: 1, min: 1, hint });
+// A coverage of 0, or no coats, would buy nothing; ask for the figure instead.
+const labelAsks = (f, what) => (!(f.coverage > 0) ? `how much the ${what} covers` : !(f.coats >= 1) ? 'how many coats' : '');
 
 // Paint and stain containers. US sizes are fixed; metric tins vary by country, so their sizes are editable.
 function liquid(units, usPrices, metricSizes, metricPrices) {
@@ -329,6 +331,8 @@ const PAINT = {
     }
     if (!(net > 0)) return { missing: 'walls bigger than the doors and windows in them', steps };
     steps.push(['To paint', `${n(net, 1)} ${U.area}`]);
+    const asks = labelAsks(f, 'paint') || (f.primer && !(f.primerCoverage > 0) && 'how much the primer covers');
+    if (asks) return { missing: asks, steps };
     const parts = [];
     const coat = f.coats === 1 ? 'coat' : 'coats';
     const paint = coatsNeed(net, f.coats, f.coverage);
@@ -391,6 +395,8 @@ const STAIN = {
     if (r.stairs) steps.push(['Stairs', `${n(m.steps, 0)} steps × ${n(m.sw)} ${U.len} wide × ${n(f.stepDepth)} ${U.len} = ${n(r.stairs, 1)} ${U.area}`]);
     if (r.fence) steps.push(['Fence', `${n(m.fl)} × ${n(m.fh)} ${U.len} × ${m.sides === '1' ? '1 side' : '2 sides'} = ${n(r.fence, 1)} ${U.area}`]);
     if (steps.length > 1) steps.push(['To stain', `${n(r.total, 1)} ${U.area}`]);
+    const asks = labelAsks(f, 'stain');
+    if (asks) return { missing: asks, steps };
     const need = coatsNeed(r.total, f.coats, f.coverage);
     steps.push(['Stain', `${n(f.coats, 0)} ${f.coats === 1 ? 'coat' : 'coats'} at ${n(f.coverage)} ${U.area} per ${U.liqName} = ${n(need)} ${U.liq}`]);
     steps.push([`+${n(f.waste, 0)}% extra`, `${n(withExtra(need, f.waste))} ${U.liq}`]);
@@ -436,6 +442,8 @@ const SEALER = {
     const U = SYS[sysOf(units)];
     if (areaMissing(m)) return { missing: areaAsk(m) };
     const area = areaOf(m);
+    const asks = labelAsks(f, 'sealer');
+    if (asks) return { missing: asks, steps: [areaStep(m, U, n, 'Driveway')] };
     const us = sysOf(units) === 'us';
     const need = coatsNeed(area, f.coats, f.coverage);
     const unit = us ? 'pails' : 'L';
@@ -488,6 +496,7 @@ const SEED = {
     const U = SYS[sysOf(units)];
     if (areaMissing(m)) return { missing: areaAsk(m) };
     const area = areaOf(m);
+    if (!(f.rate > 0)) return { missing: 'how thickly to seed', steps: [areaStep(m, U, n, 'Lawn')] };
     const us = sysOf(units) === 'us';
     // lb per 1,000 sq ft × sq ft ÷ 1,000 = lb; g per m² × m² ÷ 1,000 = kg.
     const need = area * f.rate / 1000;
@@ -530,6 +539,7 @@ const FEED = {
     const U = SYS[sysOf(units)];
     if (areaMissing(m)) return { missing: areaAsk(m) };
     const area = areaOf(m);
+    if (!(f.apps >= 1)) return { missing: 'how many times this year', steps: [areaStep(m, U, n, 'Lawn')] };
     const need = area * f.apps;
     const steps = [areaStep(m, U, n, 'Lawn')];
     if (f.apps > 1) steps.push([`${n(f.apps, 0)} times`, `${n(need, 0)} ${U.area}`]);

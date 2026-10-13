@@ -215,6 +215,25 @@ test('your own label figures and prices override the typical ones', () => {
   assert.equal(q.total, 30);
 });
 
+test('a coverage, seeding rate or coat count of 0 asks for a real one rather than buying nothing', () => {
+  const deck = { dl: ft(12), dw: ft(16) }, lawn = { shape: 'area', a: sqft(5000) };
+  const asks = (id, m, figs, v = '') => answer(id, { v: v || undefined, m, f: { us: { [v]: figs } } }).q;
+  const cover0 = asks('stain', deck, { coverage: 0 });
+  assert.match(cover0.missing, /^how much the stain covers$/);
+  assert.equal(cover0.total, null);
+  assert.ok(cover0.steps.some(([k]) => k === 'Deck boards'), 'it still shows the area');
+  assert.match(asks('stain', deck, { coats: 0 }).missing, /^how many coats$/);
+  assert.match(asks('paint', { rl: ft(12), rw: ft(14) }, { coverage: 0 }, 'interior').missing, /^how much the paint covers$/);
+  assert.match(asks('paint', { perim: ft(160), h: ft(10) }, { coats: 0.5 }, 'exterior').missing, /^how many coats$/);
+  const primer = answer('paint', { v: 'exterior', m: { perim: ft(160), h: ft(10) }, c: { exterior: { primer: true } }, f: { us: { exterior: { primerCoverage: 0 } } } }).q;
+  assert.match(primer.missing, /^how much the primer covers$/);
+  assert.match(asks('sealer', { l: ft(60), w: ft(12) }, { coverage: 0 }).missing, /^how much the sealer covers$/);
+  assert.match(asks('seed', lawn, { rate: 0 }).missing, /^how thickly to seed$/);
+  assert.match(asks('feed', lawn, { apps: 0 }, 'fertilizer').missing, /^how many times this year$/);
+  // One coat is plenty.
+  assert.equal(asks('stain', deck, { coats: 1 }).missing, undefined);
+});
+
 test('driveway sealer: pails for two coats', () => {
   const { q, summary } = answer('sealer', { m: { l: ft(60), w: ft(12) } });
   close(q.parts[0].need, 720 * 2 / 350 * 1.05);

@@ -258,6 +258,11 @@ try {
   await page.locator('.buy-list').getByText('five-gallon pail').waitFor();
   await page.getByLabel('The wood').selectOption('new');
   assert.equal(await page.getByLabel('Stain covers').inputValue(), '250');
+  // A coverage of 0 asks for a real one instead of buying nothing, and there's always at least one coat.
+  await page.getByLabel('Stain covers').fill('0');
+  await page.locator('.calc-out').getByText('Put in how much the stain covers to see how much to buy.').waitFor();
+  assert.equal(await page.getByLabel('Coats').getAttribute('min'), '1');
+  await page.getByLabel('Stain covers').fill('250');
   // A size the store doesn't sell is left out.
   await page.getByLabel('Gallon: price').fill('');
   await page.locator('.buy-list').getByText('8 quarts').waitFor();

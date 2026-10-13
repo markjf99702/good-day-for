@@ -833,7 +833,7 @@ function calcBody(calc, saved, draw) {
     if (fd.type === 'check') return checkRow(id, fd.label, !!inp.f[fd.key], x => { choices()[fd.key] = x; persist(); draw(); });
     const typical = typeof fd.def === 'function' ? fd.def(inp.f) : fd.def;
     const mine = figs()[fd.key];
-    return numRow({ id, label: fd.label, value: inp.f[fd.key], unit: fd.unit, hint: fd.hint, count: fd.step === 1,
+    return numRow({ id, label: fd.label, value: inp.f[fd.key], unit: fd.unit, hint: fd.hint, count: fd.step === 1, min: fd.min,
       onInput: x => { if (x == null || !(x >= 0)) delete figs()[fd.key]; else figs()[fd.key] = x; persist(); update(); },
       extra: typeof mine === 'number' && mine !== typical && h('button', { class: 'link small', type: 'button', onclick: () => { delete figs()[fd.key]; persist(); draw(); } }, `Back to the typical ${shown(typical)}`) });
   });
@@ -907,11 +907,11 @@ function calcBody(calc, saved, draw) {
   ];
 }
 
-function numRow({ id, label, value, unit, hint, count, onInput, extra }) {
+function numRow({ id, label, value, unit, hint, count, min = 0, onInput, extra }) {
   return h('div', { class: 'fld' },
     h('label', { for: id }, label),
     h('span', { class: 'num' },
-      h('input', { id, type: 'number', inputmode: count ? 'numeric' : 'decimal', min: 0, step: count ? 1 : 'any', value: shown(value),
+      h('input', { id, type: 'number', inputmode: count ? 'numeric' : 'decimal', min, step: count ? 1 : 'any', value: shown(value),
         oninput: e => onInput(e.target.value === '' ? null : +e.target.value) }),
       h('span', { class: 'unit' }, unit || '')),
     (hint || extra) && h('small', { class: 'hint' }, hint, hint && extra ? ' ' : '', extra),
