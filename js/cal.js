@@ -19,8 +19,23 @@ export function zonedToUtc(local, tz) {
   return utc;
 }
 
+// When to remind you to check the forecast again: 7 PM the evening before, where the
+// job is. Once that's gone by, an hour before the start instead.
+//   start: the start, in UTC ms   local: the same start as the place's "YYYY-MM-DDTHH:MM"
+export function reminderFor(start, local, tz, now = Date.now()) {
+  const dayBefore = new Date(Date.UTC(+local.slice(0, 4), +local.slice(5, 7) - 1, +local.slice(8, 10) - 1)).toISOString().slice(0, 10);
+  const evening = zonedToUtc(`${dayBefore}T19:00`, tz);
+  return evening > now && evening < start ? evening : start - 36e5;
+}
+
 const stamp = ms => new Date(ms).toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '');
 const esc = s => String(s).replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\n/g, '\\n');
+
+// How long before the start an alarm goes off, as an iCalendar duration: "-PT20H", "-PT45M".
+function before(ms) {
+  const m = Math.max(0, Math.round(ms / 6e4)), hrs = Math.floor(m / 60);
+  return `-PT${hrs ? `${hrs}H` : ''}${m % 60 || !hrs ? `${m % 60}M` : ''}`;
+}
 
 // Lines longer than 75 octets get folded, per RFC 5545.
 function fold(line) {
@@ -33,7 +48,7 @@ function fold(line) {
   return out.join('\r\n');
 }
 
-export function icsFor({ title, details, start, end, url }) {
+export function icsFor({ title, details, start, end, url, remind = start - 36e5 }) {
   const lines = [
     'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Good Day For//EN', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH',
     'BEGIN:VEVENT',
@@ -44,7 +59,7 @@ export function icsFor({ title, details, start, end, url }) {
     `SUMMARY:${esc(title)}`,
     `DESCRIPTION:${esc(details)}`,
     ...(url ? [`URL:${url}`] : []),
-    'BEGIN:VALARM', 'ACTION:DISPLAY', 'TRIGGER:-PT12H', `DESCRIPTION:${esc('Check the forecast again: ' + title)}`, 'END:VALARM',
+    'BEGIN:VALARM', 'ACTION:DISPLAY', `TRIGGER:${before(start - remind)}`, `DESCRIPTION:${esc('Check the forecast again: ' + title)}`, 'END:VALARM',
     'END:VEVENT', 'END:VCALENDAR',
   ];
   return lines.map(fold).join('\r\n') + '\r\n';

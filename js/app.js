@@ -6,7 +6,7 @@ import { makeFmt, relDay, ruleText, obsText, blockerText, alertText, aheadText, 
 import { unitFor, measureFor } from './units.js';
 import { fetchForecast, fetchHistory, searchPlaces, locate, nameFor, placeKey, placeLabel } from './weather.js';
 import * as store from './store.js';
-import { zonedToUtc, downloadIcs, googleLink } from './cal.js';
+import { zonedToUtc, reminderFor, downloadIcs, googleLink } from './cal.js';
 import { CALCS, calcById, jobsOf, inputsFor, quote, summaryOf, applyRoute, packName, packLabel, moneyFmt, numFmt } from './materials.js';
 import { historyRange, frostEntry, summarize, anchors, monthDayOf, dayOfSeason, monthTicks, seasonName, coolMonths, addDays, SEASON_DAYS, HARD, VERSION as FROST_VERSION } from './frost.js';
 import { CROPS, KINDS, GROUPS as PLANT_GROUPS, calendar, segments, windowsNear, weekPlan, seasonFor, say } from './planting.js';
@@ -684,7 +684,8 @@ function calendarButtons(job, s) {
   const details = `${fmt.date(fc.time[s])} at ${fmt.hour(fc.time[s])}, from Good Day For (${placeLabel(state.place)}).\nForecasts change: check again the day before.\n${location.href.split('#')[0]}#/job/${encodeURIComponent(job.id)}`;
   const ev = { title, details, start, end };
   return h('div', { class: 'i-actions' },
-    h('button', { class: 'btn', onclick: () => downloadIcs(ev, `${job.id}-${fc.time[s].slice(0, 10)}.ics`) }, 'Add to calendar'),
+    // The file carries a reminder the evening before. A Google link can't; Google uses your own.
+    h('button', { class: 'btn', onclick: () => downloadIcs({ ...ev, remind: reminderFor(start, fc.time[s], fc.tz) }, `${job.id}-${fc.time[s].slice(0, 10)}.ics`) }, 'Add to calendar'),
     h('a', { class: 'btn ghost', href: googleLink(ev), target: '_blank', rel: 'noopener' }, 'Google Calendar'),
   );
 }

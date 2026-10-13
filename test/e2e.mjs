@@ -180,6 +180,14 @@ try {
   assert.match(ics, /BEGIN:VEVENT/);
   assert.match(ics, /SUMMARY:🪵 Stain or seal the deck or fence/);
   assert.match(ics, /DTSTART:\d{8}T\d{6}Z/);
+  // Its reminder goes off at 7 PM the evening before, Columbus time, or an hour ahead once that's gone by.
+  const [, st] = ics.match(/DTSTART:(\d{8}T\d{4})/);
+  const startMs = Date.UTC(+st.slice(0, 4), +st.slice(4, 6) - 1, +st.slice(6, 8), +st.slice(9, 11), +st.slice(11, 13));
+  const [, hrs = 0, mins = 0] = ics.match(/TRIGGER:-PT(?:(\d+)H)?(?:(\d+)M)?\r\n/);
+  const remindAt = startMs - (hrs * 60 + +mins) * 6e4;
+  const ohio = ms => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(ms));
+  const eveBefore = `${new Date(Date.parse(`${ohio(startMs).slice(0, 10)}T00:00Z`) - 864e5).toISOString().slice(0, 10)}, 19:00`;
+  assert.ok(ohio(remindAt) === eveBefore || remindAt === startMs - 36e5, `reminder at ${ohio(remindAt)} for a start at ${ohio(startMs)}`);
   // Arrow keys move the selection.
   const before = await page.locator('.inspect h3').textContent();
   await page.locator('.cell.sel').focus();
