@@ -184,7 +184,11 @@ function softRender() {
 
 function renderHeader() {
   const btn = $('#placeBtn');
-  btn.querySelector('span').textContent = state.place ? placeLabel(state.place) : 'Pick a place';
+  const shown = state.place ? placeLabel(state.place) : 'Pick a place';
+  btn.querySelector('span').textContent = shown;
+  // Named by what it shows first, so a screen reader says the place and voice control can find it.
+  if (state.place) btn.setAttribute('aria-label', `${shown}, change place`);
+  else btn.removeAttribute('aria-label');
 }
 
 // ——— Shared pieces ———

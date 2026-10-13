@@ -135,11 +135,14 @@ try {
   const { context, page } = await newPage();
   await page.goto(base);
   await page.getByRole('heading', { name: 'Is it a good day for it?' }).waitFor();
+  assert.equal(await page.getByRole('button', { name: 'Pick a place', exact: true }).count(), 1);
   await snap(page, '01-welcome');
   await page.getByRole('searchbox', { name: 'City or ZIP code' }).fill('Columbus');
   await page.getByRole('button', { name: /Columbus Ohio/ }).click();
   await page.locator('.cards .card').first().waitFor();
   assert.equal(await page.locator('#placeBtn span').textContent(), 'Columbus, Ohio');
+  // Its name starts with the place it shows (for screen readers and voice control).
+  assert.equal(await page.getByRole('button', { name: 'Columbus, Ohio, change place', exact: true }).count(), 1);
 
   // ——— Jobs ———
   const cards = page.locator('.cards .card:not(.add)');
