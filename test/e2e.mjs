@@ -263,6 +263,12 @@ try {
   await page.locator('.calc-out').getByText('Put in how much the stain covers to see how much to buy.').waitFor();
   assert.equal(await page.getByLabel('Coats').getAttribute('min'), '1');
   await page.getByLabel('Stain covers').fill('250');
+  // A big order: the count in the price line is written the same way as the headline.
+  await page.getByLabel('Deck length').fill('2000');
+  await page.getByLabel('Deck width').fill('2000');
+  await page.locator('.buy-list').getByText('3,520 × $200').waitFor();
+  await page.getByLabel('Deck length').fill('12');
+  await page.getByLabel('Deck width').fill('16');
   // A size the store doesn't sell is left out.
   await page.getByLabel('Gallon: price').fill('');
   await page.locator('.buy-list').getByText('8 quarts').waitFor();

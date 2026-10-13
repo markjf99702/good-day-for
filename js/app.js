@@ -959,7 +959,7 @@ function fillAnswer(calc, saved, out, bar, draw) {
       q.parts.length > 1 && h('h4', {}, p.label),
       h('ul', { class: 'buy-list' }, p.buy.items.map(x => h('li', {},
         h('b', {}, packLabel(x.pack, x.n, n)),
-        typeof x.pack.price === 'number' && h('span', { class: 'cost' }, x.n > 1 ? `${x.n} × ${money(x.pack.price)}` : money(x.pack.price))))),
+        typeof x.pack.price === 'number' && h('span', { class: 'cost' }, x.n > 1 ? `${n(x.n, 0)} × ${money(x.pack.price)}` : money(x.pack.price))))),
       h('p', { class: 'muted small' }, `That’s ${n(p.buy.amount)} ${p.unit} for the ${n(p.need)} ${p.unit} you need.`),
     )),
     h('p', { class: 'total' }, q.total != null ? [h('span', {}, 'Total'), h('b', {}, money(q.total))] : h('span', {}, 'Add prices to see a total.')),
