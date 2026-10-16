@@ -379,3 +379,16 @@ test('laundry wants a breeze: a dead-calm stretch is iffy, and says why', () => 
   assert.equal(ruleText(rule, makeFmt('us', 'en-US')), 'At least a 3 mph breeze while you work');
   assert.equal(blockerText(rule, ctx), 'Dead calm');
 });
+
+test('the drying-air rule gives the number the reading is compared with', () => {
+  const { ctx } = setup();
+  const fmt = makeFmt('us', 'en-US');
+  const [must, ideal] = byId('laundry').rules.filter(r => r.t === 'vpdMin');
+  assert.equal(ruleText(must, fmt), 'Drying air of at least 0.4 kPa while you work');
+  assert.equal(ruleText(ideal, fmt), 'Drying air of at least 0.8 kPa while you work');
+  assert.equal(ruleText({ t: 'vpdMin', v: 0.45, when: 'after', h: 2 }, fmt), 'Drying air of at least 0.45 kPa for 2 hours after you finish');
+  assert.equal(ruleText({ t: 'vpdMin', v: null }, fmt), 'Drying air of at least 0 kPa while you work', 'a damaged save still reads');
+  const said = v => obsText(must, { st: GO, v, at: ctx.i0 }, ctx, fmt);
+  assert.equal(said(0.35), 'Fair drying air (0.35 kPa on average)');
+  assert.equal(said(0.8), 'Good drying air (0.80 kPa on average)');
+});

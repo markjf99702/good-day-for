@@ -132,7 +132,7 @@ export function spanText(rule) {
   }
 }
 
-const dryWord = v => (v < 0.3 ? 'Some' : v < 0.6 ? 'Decent' : v < 1 ? 'Good' : 'Great');
+// How well the air dries things, for what the forecast shows. The rule itself gives the number.
 const dryLevel = v => (v < 0.3 ? 'poor' : v < 0.6 ? 'fair' : v < 1 ? 'good' : 'great');
 
 export function ruleText(rule, fmt) {
@@ -151,7 +151,7 @@ export function ruleText(rule, fmt) {
     case 'dewMax': return `Dew point under ${fmt.temp(rule.v)} ${s}`;
     case 'cloudMin': return `At least ${Math.round(rule.v)}% cloud cover ${s}`;
     case 'cloudMax': return `Under ${Math.round(rule.v)}% cloud cover ${s}`;
-    case 'vpdMin': return `${dryWord(rule.v)} drying air or better ${s}`;
+    case 'vpdMin': return `Drying air of at least ${Math.round((+rule.v || 0) * 100) / 100} kPa ${s}`;
     case 'rainMax': return `Less than ${fmt.rain(rule.v)} of rain ${s}`;
     case 'rainMin': return `At least ${fmt.rain(rule.v)} of rain ${s}`;
     case 'soil': {
