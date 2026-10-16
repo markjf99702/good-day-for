@@ -667,6 +667,7 @@ try {
     // The amber "Iffy" headline a card shows when nothing's fully clear reads at 4.5:1 or better.
     await p2.evaluate(() => { const b = document.createElement('b'); b.className = 'iffy-t'; b.id = 'iffy-probe'; b.textContent = 'Iffy'; document.querySelector('.card .next').prepend(b); });
     const iffyText = await seen(p2, '#iffy-probe');
+    await p2.evaluate(() => document.getElementById('iffy-probe').remove()); // so the screenshot shows the real card
     assert.ok(iffyText.ratio >= 4.5, `Iffy headline contrast (${scheme}): ${iffyText.ratio.toFixed(2)}`);
     const phoneMini = await labels(p2, '.mini .m-h');
     assert.equal(phoneMini.overlaps, 0, `phone card labels: ${JSON.stringify(phoneMini)}`);
