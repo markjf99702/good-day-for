@@ -7,14 +7,20 @@ import { JOBS, byId } from '../js/jobs.js';
 import { makeFmt, ruleText, obsText, blockerText, alertText, aheadText, hourText } from '../js/text.js';
 import { fromF, fromIn } from '../js/units.js';
 
-// Pin "now" to 9 AM today at the place so every run sees the same hours.
+// Pin "now" to 9 AM today at the place so every run sees the same hours. The forecast is
+// fetched at 9 AM too: fetched between midnight and 2 AM on the night the clocks change, it
+// would be labelled with the old offset, and today's sunrise would read an hour off.
 function setup(hour = 9) {
   const tz = 'America/New_York';
-  const raw = makeForecast({ tz });
+  const pinned = r => {
+    const d = r.daily.time[7];
+    return Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10), hour) - r.utc_offset_seconds * 1000;
+  };
+  const raw = makeForecast({ tz, now: pinned(makeForecast({ tz })) });
   const fc = normalize(raw);
   const today = fc.days[7].date;
   const i = fc.time.indexOf(`${today}T${String(hour).padStart(2, '0')}:00`);
-  const guess = Date.UTC(+today.slice(0, 4), +today.slice(5, 7) - 1, +today.slice(8, 10), hour) - raw.utc_offset_seconds * 1000;
+  const guess = pinned(raw);
   const ctx = prepare(fc, guess + 60_000);
   assert.equal(ctx.i0, i, 'now lands on the right hour');
   return { fc, ctx, today };

@@ -686,7 +686,8 @@ try {
     const phone24 = await labels(p2, '.g-hours .g-h');
     assert.equal(phone24.overlaps, 0, `24-hour phone labels: ${JSON.stringify(phone24)}`);
     assert.deepEqual([phone24.lines, phone24.min, phone24.shown], [2, 12, 24], `24-hour phone labels, midnight to 11 and noon to 11: ${JSON.stringify(phone24)}`);
-    const square = await p2.locator('.g-row:not(.g-hours) button.cell').first().boundingBox();
+    // A whole square: on the night the clocks go back, the hour under way can be half of the 1 AM pair.
+    const square = await p2.locator('.g-row:not(.g-hours) > button.cell').first().boundingBox();
     assert.ok(square.width >= 20, `24-hour squares on a phone are ${square.width}px wide`);
     assert.ok(await sideways(p2) <= 0, `24-hour grid fits a phone (${await sideways(p2)}px)`);
     await p2.goto(base + '#/job/laundry');
