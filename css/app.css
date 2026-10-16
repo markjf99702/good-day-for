@@ -188,7 +188,7 @@ main { width: 100%; max-width: 1100px; margin: 0 auto; padding: 1rem 16px 2rem; 
 .pill.go { background: color-mix(in srgb, var(--go) 18%, transparent); color: color-mix(in srgb, var(--go) 70%, var(--ink)); }
 .pill.iffy { background: color-mix(in srgb, var(--iffy) 22%, transparent); color: color-mix(in srgb, var(--iffy) 55%, var(--ink)); }
 .next { margin: .1rem 0 0; }
-.iffy-t { color: color-mix(in srgb, var(--iffy) 60%, var(--ink)); }
+.iffy-t { color: color-mix(in srgb, var(--iffy) 55%, var(--ink)); }
 .sub { margin: 0; font-size: .86rem; color: var(--ink-2); }
 .sub.extra { color: var(--ink); }
 .bonus { color: color-mix(in srgb, var(--iffy) 55%, var(--ink)); }
@@ -260,7 +260,9 @@ main { width: 100%; max-width: 1100px; margin: 0 auto; padding: 1rem 16px 2rem; 
 
 .grid { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: .6rem .5rem .6rem .4rem; }
 .g-row { display: grid; grid-template-columns: 3.4rem repeat(var(--cols, 24), minmax(0, 1fr)); gap: 2px; align-items: center; margin-bottom: 2px; }
-.g-row.far { opacity: .62; }
+/* Past a week the forecast is a rough guide: its squares fade, but not the day names. */
+.g-row.far .cell { opacity: .62; }
+.g-row.far .cell.busy { opacity: .2; }
 .g-hours {
   position: sticky; top: 3.4rem; z-index: 2;
   background: var(--surface); margin: -.6rem 0 4px; padding: .55rem 0 .3rem;

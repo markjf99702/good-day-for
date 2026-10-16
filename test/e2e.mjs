@@ -115,6 +115,22 @@ const labels = async (page, sel) => {
 
 const snap = async (page, name, full = true) => { if (shots) await page.screenshot({ path: join(shots, `${name}.png`), fullPage: full }); };
 const sideways = page => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+// How the text of the first element matching sel stands out from what's behind it (WCAG ratio),
+// counting any fading on the way up, and how faded it is.
+const seen = (page, sel) => page.evaluate(sel => {
+  const parse = c => { const m = c.match(/color\(srgb ([\d.e-]+) ([\d.e-]+) ([\d.e-]+)/); return m ? m.slice(1, 4).map(x => x * 255) : c.match(/[\d.]+/g).slice(0, 3).map(Number); };
+  const lum = rgb => rgb.map(v => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }).reduce((t, v, k) => t + v * [0.2126, 0.7152, 0.0722][k], 0);
+  const el = document.querySelector(sel);
+  let opacity = 1, bg = null;
+  for (let e = el; e; e = e.parentElement) {
+    const cs = getComputedStyle(e);
+    opacity *= +cs.opacity;
+    if (!bg && !/rgba\(0, 0, 0, 0\)|transparent/.test(cs.backgroundColor)) bg = parse(cs.backgroundColor);
+  }
+  const fg = parse(getComputedStyle(el).color).map((v, k) => opacity * v + (1 - opacity) * bg[k]);
+  const [a, b] = [lum(fg), lum(bg)].sort((x, y) => y - x);
+  return { ratio: (a + 0.05) / (b + 0.05), opacity };
+}, sel);
 const setPlace = async (page, place, units = 'us') => {
   await page.evaluate(([p, u]) => localStorage.setItem('gooddayfor:v1', JSON.stringify({ place: p, units: u })), [place, units]);
   await page.reload();
@@ -366,6 +382,7 @@ try {
   assert.ok(await page.locator('.mini i.busy').count() > 0, 'busy hours show up');
   await page.goto(base + '#/job/ext-paint');
   assert.match(await page.locator('.checks').textContent(), /10°C/);
+  assert.ok((await seen(page, '.g-row.far .cell.busy')).opacity < 0.25, 'busy hours fade further out too');
   // Metric: the saved deck comes back in metres, and tins are in litres.
   await page.goto(base + '#/buy/stain');
   assert.equal(await page.getByLabel('Deck length').inputValue(), '3.66');
@@ -644,6 +661,10 @@ try {
     await p2.locator('.cards .card').first().waitFor();
     const overflow = await p2.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     assert.ok(overflow <= 0, `no sideways scroll on a phone (${overflow}px)`);
+    // The amber "Iffy" headline a card shows when nothing's fully clear reads at 4.5:1 or better.
+    await p2.evaluate(() => { const b = document.createElement('b'); b.className = 'iffy-t'; b.id = 'iffy-probe'; b.textContent = 'Iffy'; document.querySelector('.card .next').prepend(b); });
+    const iffyText = await seen(p2, '#iffy-probe');
+    assert.ok(iffyText.ratio >= 4.5, `Iffy headline contrast (${scheme}): ${iffyText.ratio.toFixed(2)}`);
     const phoneMini = await labels(p2, '.mini .m-h');
     assert.equal(phoneMini.overlaps, 0, `phone card labels: ${JSON.stringify(phoneMini)}`);
     assert.ok(phoneMini.min >= 3, `phone card labels: ${JSON.stringify(phoneMini)}`);
@@ -664,6 +685,10 @@ try {
     await p2.goto(base + '#/job/laundry');
     await p2.locator('.inspect').waitFor();
     await snap(p2, `11-phone-detail-${scheme}`, false);
+    // Past a week the squares fade as a rough guide, but the day names stay readable.
+    const farDay = await seen(p2, '.g-row.far .g-day'), farCell = await seen(p2, '.g-row.far .cell:not(.none)');
+    assert.ok(farDay.ratio >= 4.5, `far-off day names (${scheme}): ${farDay.ratio.toFixed(2)}`);
+    assert.ok(Math.abs(farCell.opacity - 0.62) < 0.01, `far-off squares fade (${scheme}): ${farCell.opacity}`);
     // Scrolled down, the hour row stays in view under the top bar.
     await p2.locator('.g-row.far').last().scrollIntoViewIfNeeded();
     const stuck = await p2.locator('.g-hours').boundingBox();
