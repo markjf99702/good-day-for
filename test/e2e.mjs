@@ -85,7 +85,8 @@ async function newPage(opts = {}, { archive = {}, fail = false, down = [], weath
   });
   return { context, page };
 }
-// Hour labels that are showing, per grid: how many, and how many run into the next one.
+// Hour labels that are showing, per line of each grid (a 24-hour grid on a phone wraps its hours
+// onto two lines): how many, and how many run into the next one.
 // The labels are fitted once each grid has been laid out, which can lag on a busy machine.
 const labels = async (page, sel) => {
   await page.waitForFunction(sel => {
@@ -93,23 +94,25 @@ const labels = async (page, sel) => {
     return all.length > 0 && all.every(l => l.closest('[data-fit]'));
   }, sel);
   return page.evaluate(sel => {
-    const rows = new Map();
+    const grids = [], lines = new Map();
     for (const lab of document.querySelectorAll(sel)) {
       if (getComputedStyle(lab).visibility === 'hidden') continue;
       const text = [...lab.children].find(c => getComputedStyle(c).display !== 'none');
       const r = text.getBoundingClientRect();
       if (!r.width) continue;
-      if (!rows.has(lab.parentElement)) rows.set(lab.parentElement, []);
-      rows.get(lab.parentElement).push({ left: r.left, right: r.right, text: text.textContent });
+      if (!grids.includes(lab.parentElement)) grids.push(lab.parentElement);
+      const key = `${grids.indexOf(lab.parentElement)}:${Math.round(r.top)}`;
+      if (!lines.has(key)) lines.set(key, []);
+      lines.get(key).push({ left: r.left, right: r.right, text: text.textContent });
     }
     let shown = 0, overlaps = 0, min = Infinity;
-    for (const list of rows.values()) {
+    for (const list of lines.values()) {
       list.sort((a, b) => a.left - b.left);
       shown += list.length;
       min = Math.min(min, list.length);
       for (let i = 1; i < list.length; i++) if (list[i].left < list[i - 1].right + 1) overlaps++;
     }
-    return { grids: rows.size, shown, overlaps, min, sample: [...rows.values()][0]?.map(x => x.text) };
+    return { grids: grids.length, lines: lines.size, shown, overlaps, min, sample: [...lines.values()][0]?.map(x => x.text) };
   }, sel);
 };
 
@@ -676,12 +679,16 @@ try {
     const phoneBig = await labels(p2, '.g-hours .g-h');
     assert.equal(phoneBig.overlaps, 0, `phone grid labels: ${JSON.stringify(phoneBig)}`);
     assert.equal(phoneBig.shown, await p2.locator('.g-hours .g-h').count(), `every hour labelled on a phone: ${JSON.stringify(phoneBig)}`);
-    // An any-time job keeps all 24 hours, still readable.
+    // An any-time job keeps all 24 hours: on a phone, two rows of 12 a day, big enough to tap.
     await p2.goto(base + '#/job/water');
     await p2.locator('.inspect').waitFor();
     assert.equal(await p2.locator('.g-hours .g-h').count(), 24);
     const phone24 = await labels(p2, '.g-hours .g-h');
     assert.equal(phone24.overlaps, 0, `24-hour phone labels: ${JSON.stringify(phone24)}`);
+    assert.deepEqual([phone24.lines, phone24.min, phone24.shown], [2, 12, 24], `24-hour phone labels, midnight to 11 and noon to 11: ${JSON.stringify(phone24)}`);
+    const square = await p2.locator('.g-row:not(.g-hours) button.cell').first().boundingBox();
+    assert.ok(square.width >= 20, `24-hour squares on a phone are ${square.width}px wide`);
+    assert.ok(await sideways(p2) <= 0, `24-hour grid fits a phone (${await sideways(p2)}px)`);
     await p2.goto(base + '#/job/laundry');
     await p2.locator('.inspect').waitFor();
     await snap(p2, `11-phone-detail-${scheme}`, false);

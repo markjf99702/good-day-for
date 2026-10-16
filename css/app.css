@@ -279,6 +279,13 @@ span.cell { cursor: default; }
 .cell:hover { filter: brightness(.93); }
 .cell.sel { outline: 2.5px solid var(--ink); outline-offset: 1px; z-index: 1; }
 @media (min-width: 700px) { .cell { height: 24px; } .g-row { gap: 3px; margin-bottom: 3px; } }
+/* A grid of all 24 hours on a phone: two rows of 12 a day, midnight to 11 AM and noon to 11 PM,
+   so the squares are big enough to tap. The labels along the top wrap the same way. */
+@media (max-width: 559.98px) {
+  .grid[data-cols="24"] .g-row { grid-template-columns: 3.4rem repeat(12, minmax(0, 1fr)); margin-bottom: 8px; }
+  .grid[data-cols="24"] .g-row > :nth-child(14) { grid-column-start: 2; }
+  .grid[data-cols="24"] .g-hours { margin-bottom: 6px; }
+}
 
 .inspect { margin-top: 1rem; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: .9rem 1rem; box-shadow: var(--shadow); scroll-margin-top: 70px; }
 .i-head { display: flex; align-items: center; gap: .6rem; }
