@@ -131,10 +131,11 @@ export function locate() {
   });
 }
 
-// Best-effort name for coordinates; falls back to "My location".
+// Best-effort name for coordinates; falls back to "My location". BigDataCloud only
+// gets them to two decimals (about a kilometre), which is enough to name the town.
 export async function nameFor(lat, lon) {
   try {
-    const res = await fetch(`${REVERSE}?${new URLSearchParams({ latitude: lat, longitude: lon, localityLanguage: 'en' })}`);
+    const res = await fetch(`${REVERSE}?${new URLSearchParams({ latitude: lat.toFixed(2), longitude: lon.toFixed(2), localityLanguage: 'en' })}`);
     const j = await res.json();
     const name = j.city || j.locality;
     if (name) return { name, admin: j.principalSubdivision || '', country: j.countryName || '', cc: j.countryCode || '' };

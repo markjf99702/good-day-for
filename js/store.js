@@ -1,5 +1,7 @@
-// Everything is kept in this browser's localStorage. Nothing leaves the device
-// except the coordinates sent to the weather service.
+// Everything is kept in this browser's localStorage. What leaves the device:
+// Open-Meteo gets the place's coordinates (for the forecast and the weather
+// history) and whatever is typed into place search, and after "Use my location"
+// BigDataCloud gets that spot to about a kilometre, to name it (weather.js).
 
 import { DEFAULT_PICKS } from './jobs.js';
 import { guessUnits } from './units.js';
