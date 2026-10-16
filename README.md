@@ -122,7 +122,7 @@ To put it online with GitHub Pages: **Settings → Pages → Build and deploymen
 - `js/materials.js`: how much to buy. It has the calculators, their typical figures, and the container rounding.
 - `js/frost.js`: frost dates from the weather history. Like the engine, it's pure functions.
 - `js/planting.js`: the planting calendar, as weeks either side of the frost dates.
-- `js/weather.js`: Open-Meteo forecast, weather history and place search.
+- `js/weather.js`: Open-Meteo forecast, weather history and place search, and the town name for Use my location, which BigDataCloud gives for the spot rounded to about a kilometre.
 - `js/app.js`: the page.
 - `js/store.js`, `js/cal.js`, `js/units.js`: saved settings and frost dates, calendar export, and unit conversion.
 - `sw.js`: keeps a copy for using offline.
