@@ -344,6 +344,7 @@ export const JOBS = [
       { t: 'dry', when: 'during' },
       { t: 'vpdMin', v: 0.4, why: 'How thirsty the air is. Damp, cool air barely dries anything.' },
       { t: 'vpdMin', v: 0.8, lvl: 'ideal' },
+      { t: 'windMin', v: mph(3), lvl: 'ideal', why: 'A breeze carries the damp away.' },
       { t: 'windMax', v: mph(25), lvl: 'ideal', why: 'Keeps the sheets on the line.' },
     ],
   },

@@ -364,3 +364,18 @@ test('with no clock change, or no time zone to go by, hours read as labelled', (
     assert.deepEqual(ctx.local, ctx.fc.time, String(odd));
   }
 });
+
+test('laundry wants a breeze: a dead-calm stretch is iffy, and says why', () => {
+  const { fc, ctx } = setup();
+  const laundry = byId('laundry');
+  const s = at(ctx, 1, 11);
+  assert.notEqual(rateStart(laundry, ctx, s).st, NO);
+  for (let k = s; k < s + laundry.hours; k++) fc.wind[k] = 1; // km/h
+  const calm = rateStart(laundry, ctx, s);
+  assert.equal(calm.st, IFFY);
+  const rule = laundry.rules[calm.misses.find(k => laundry.rules[k].t === 'windMin')];
+  assert.ok(rule, 'the breeze rule is what it misses');
+  assert.equal(rule.lvl, 'ideal');
+  assert.equal(ruleText(rule, makeFmt('us', 'en-US')), 'At least a 3 mph breeze while you work');
+  assert.equal(blockerText(rule, ctx), 'Dead calm');
+});
