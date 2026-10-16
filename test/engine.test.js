@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { makeForecast } from './fixture.js';
+import { makeForecast, CLOCK_CHANGES } from './fixture.js';
 import { normalize } from '../js/weather.js';
 import { prepare, rateJob, rateStart, findWindows, blockers, check, explain, alerts, waterBalance, rangesOn, GO, IFFY, NO, UNKNOWN } from '../js/engine.js';
 import { JOBS, byId } from '../js/jobs.js';
-import { makeFmt, ruleText, obsText, blockerText, alertText, aheadText } from '../js/text.js';
+import { makeFmt, ruleText, obsText, blockerText, alertText, aheadText, hourText } from '../js/text.js';
 import { fromF, fromIn } from '../js/units.js';
 
 // Pin "now" to 9 AM today at the place so every run sees the same hours.
@@ -19,7 +19,9 @@ function setup(hour = 9) {
   assert.equal(ctx.i0, i, 'now lands on the right hour');
   return { fc, ctx, today };
 }
-const at = (ctx, day, hour) => ctx.fc.time.indexOf(`${ctx.fc.days[7 + day].date}T${String(hour).padStart(2, '0')}:00`);
+// The start hour at that hour of the day, on the place's own clock (which the labels
+// stop matching once a clock change is in the forecast).
+const at = (ctx, day, hour) => ctx.local.indexOf(`${ctx.fc.days[7 + day].date}T${String(hour).padStart(2, '0')}:00`);
 
 test('daylight: hours between sunrise and sunset (with twilight) only', () => {
   const { ctx } = setup();
@@ -268,4 +270,97 @@ test('how far ahead the forecast reaches, in words', () => {
   assert.equal(aheadText(23), '23 hours');
   assert.equal(aheadText(1), '1 hour');
   assert.equal(aheadText(0), '0 hours');
+});
+
+// ——— Clock changes ———
+// Open-Meteo labels a whole forecast with the UTC offset in force when it was fetched.
+
+// A forecast fetched at one of the fixture's moments, read then or at `readAt`.
+function across(which, readAt) {
+  const { now, tz } = CLOCK_CHANGES[which];
+  const fc = { ...normalize(makeForecast({ now, tz })), fetchedAt: now };
+  const ctx = prepare(fc, readAt ?? now);
+  const count = d => ctx.date.filter(x => x === d).length;
+  return { fc, ctx, count, label: t => fc.time.indexOf(t), real: t => ctx.local.indexOf(t) };
+}
+
+test('after the clocks go back, each hour is read on the place’s own clock', () => {
+  const { ctx, count, label } = across('back');
+  // Labelled with the summer offset, 10 AM on the Monday after is really 9 AM.
+  const i = label('2026-11-02T10:00');
+  assert.equal(ctx.local[i], '2026-11-02T09:00');
+  assert.equal(new Date(ctx.ms[i]).toISOString(), '2026-11-02T14:00:00.000Z');
+  assert.deepEqual([ctx.date[i], ctx.hour[i], ctx.wday[i]], ['2026-11-02', 9, 1]);
+  assert.equal(ctx.local[label('2026-10-30T10:00')], '2026-10-30T10:00', 'before the change they agree');
+  // That Sunday is 25 hours long, with 1 AM twice.
+  assert.deepEqual([count('2026-10-31'), count('2026-11-01'), count('2026-11-02')], [24, 25, 24]);
+  const twice = ctx.local.flatMap((t, k) => (ctx.twice[k] ? [k] : []));
+  assert.deepEqual(twice.map(k => ctx.local[k]), ['2026-11-01T01:00', '2026-11-01T01:00']);
+  const fmt = makeFmt('us', 'en-US');
+  assert.deepEqual(twice.map(k => hourText(ctx, fmt, k, true)), ['Sun 1 AM EDT', 'Sun 1 AM EST']);
+  assert.equal(hourText(ctx, fmt, i, true), 'Mon 9 AM');
+});
+
+test('after the clocks go back, daylight, the time of day and your schedule go by the real clock', () => {
+  const { ctx, real } = across('back');
+  const fmt = makeFmt('us', 'en-US');
+  // The sun's up at 6:21 now (labelled 7:21), so 6 AM is light and 5 AM isn't.
+  const sun = ctx.sun[ctx.day[real('2026-11-02T06:00')]];
+  assert.deepEqual([sun.riseAt, sun.setAt], ['2026-11-02T06:21', '2026-11-02T18:14']);
+  assert.equal(ctx.light[real('2026-11-02T06:00')], true);
+  assert.equal(ctx.light[real('2026-11-02T05:00')], false);
+  assert.equal(ctx.light[real('2026-10-30T06:00')], false, 'the week before, it was up at 7:21');
+  const said = (job, t, kind) => { const e = explain(job, ctx, real(t)).find(x => x.rule.t === kind); return obsText(e.rule, e, ctx, fmt); };
+  assert.equal(said(byId('mow'), '2026-11-02T10:00', 'daylight'), 'Sun up 6:21 AM to 6:14 PM');
+  // The sprinkler's 4 to 10 AM.
+  assert.equal(said(byId('water'), '2026-11-02T09:00', 'clock'), 'Fits');
+  assert.equal(said(byId('water'), '2026-11-02T10:00', 'clock'), 'Outside those hours');
+  // Free weekday evenings from 5 PM: 4 PM on Monday is busy, 5 PM isn't.
+  ctx.avail = [[0, 24], [17, 24], [17, 24], [17, 24], [17, 24], [17, 24], [0, 24]];
+  const any = { hours: 1, rules: [{ t: 'tempMin', v: -40 }] };
+  assert.equal(rateStart(any, ctx, real('2026-11-02T16:00')).cls, 'busy');
+  assert.equal(rateStart(any, ctx, real('2026-11-02T17:00')).cls, 'go');
+  // What the forecast shows is put at the real hour.
+  const low = { t: 'tempMin', v: -40 };
+  assert.match(obsText(low, check(low, ctx, real('2026-11-02T09:00'), 1), ctx, fmt), / Mon 9 AM$/);
+  // Days, their soil averages and the heads-ups go by the real date.
+  assert.equal(ctx.day[real('2026-11-02T00:00')], ctx.fc.days.findIndex(d => d.date === '2026-11-02'));
+  assert.ok(ctx.soil[6][ctx.day[real('2026-11-01T12:00')]] != null, 'the 25-hour day has a soil average');
+  for (const a of alerts(ctx, 16)) assert.equal(a.date, a.at >= 0 ? ctx.date[a.at] : a.date);
+});
+
+test('a forecast fetched before the clocks went back still knows which hour it is', () => {
+  // Fetched on the Wednesday, opened at 10:30 AM on the Monday after.
+  const now = Date.UTC(2026, 10, 2, 15, 30);
+  const { ctx } = across('back', now);
+  assert.ok(ctx.ms[ctx.i0] <= now && now < ctx.ms[ctx.i0] + 36e5, 'the hour under way now');
+  assert.equal(ctx.local[ctx.i0], '2026-11-02T10:00');
+});
+
+test('the night the clocks go forward has no 2 AM', () => {
+  const { ctx, count, label } = across('forward');
+  assert.deepEqual([count('2027-03-13'), count('2027-03-14'), count('2027-03-15')], [24, 23, 24]);
+  assert.equal(ctx.local.indexOf('2027-03-14T02:00'), -1);
+  assert.equal(ctx.local[label('2027-03-15T09:00')], '2027-03-15T10:00');
+  assert.ok(!ctx.twice.some(Boolean));
+});
+
+test('Europe’s clock change reads the same way', () => {
+  const { ctx, count, label } = across('europe');
+  const fmt = makeFmt('metric', 'en-GB');
+  assert.equal(count('2026-10-25'), 25);
+  assert.deepEqual(ctx.local.flatMap((t, k) => (ctx.twice[k] ? [hourText(ctx, fmt, k)] : [])), ['02:00 CEST', '02:00 CET']);
+  assert.equal(ctx.local[label('2026-10-26T08:00')], '2026-10-26T07:00');
+});
+
+test('with no clock change, or no time zone to go by, hours read as labelled', () => {
+  const now = Date.UTC(2026, 6, 1, 13, 20);
+  const plain = prepare(normalize(makeForecast({ now })), now);
+  assert.deepEqual(plain.local, plain.fc.time);
+  assert.ok(!plain.twice.some(Boolean));
+  const { now: then, tz } = CLOCK_CHANGES.back;
+  for (const odd of ['Nowhere/Special', undefined]) {
+    const ctx = prepare({ ...normalize(makeForecast({ now: then, tz })), tz: odd }, then);
+    assert.deepEqual(ctx.local, ctx.fc.time, String(odd));
+  }
 });

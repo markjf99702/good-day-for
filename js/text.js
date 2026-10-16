@@ -35,7 +35,8 @@ export function makeFmt(units = 'us', locale = globalThis.navigator?.language ||
     },
     snow: cm => (units === 'metric' ? `${Math.round(cm)} cm` : `${Math.max(1, Math.round(cm / 2.54))} in`),
     depth: cm => (units === 'metric' ? `${cm} cm` : `${Math.round(cm / 2.54)} in`),
-    hour: t => hourF.format(asDate(t)).replace(':00 ', ' '),
+    // An hour that doesn't start on the hour (after Lord Howe Island's half-hour clock change) keeps its minutes.
+    hour: t => (+t.slice(14, 16) ? clockF : hourF).format(asDate(t)).replace(':00 ', ' '),
     hourOf: h => hourF.format(new Date(Date.UTC(2000, 0, 1, h % 24))),
     clock: t => clockF.format(asDate(t)),
     wd: t => wdF.format(asDate(t)),
@@ -45,10 +46,28 @@ export function makeFmt(units = 'us', locale = globalThis.navigator?.language ||
     fullDate: t => fullDateF.format(asDate(t)),
     month: m => monthF.format(new Date(Date.UTC(2000, m - 1, 1))),
     monthNarrow: m => monthNarrowF.format(new Date(Date.UTC(2000, m - 1, 1))),
-    dayHour: t => `${wdF.format(asDate(t))} ${hourF.format(asDate(t))}`,
+    dayHour: t => `${wdF.format(asDate(t))} ${fmt.hour(t)}`,
     shortHour: h => (h12 ? `${h % 12 || 12}${h < 12 ? 'a' : 'p'}` : `${h}`),
+    // The short name of the time zone in force at an instant: "EDT", "CET", "GMT+1".
+    zone: (ms, tz) => {
+      try {
+        return new Intl.DateTimeFormat(locale, { timeZone: tz, timeZoneName: 'short' }).formatToParts(new Date(ms)).find(p => p.type === 'timeZoneName')?.value || '';
+      } catch {
+        return '';
+      }
+    },
   };
   return fmt;
+}
+
+// When start hour i begins on the place's own clock: "3 PM", or "Sun 3 PM" with its
+// day. The hour the clocks go back over comes round twice, so those two also say
+// which time they're on ("1 AM EDT", "1 AM EST").
+export function hourText(ctx, fmt, i, withDay = false) {
+  const t = ctx.local[i];
+  const s = withDay ? fmt.dayHour(t) : fmt.hour(t);
+  const z = ctx.twice?.[i] ? fmt.zone(ctx.ms[i], ctx.fc.tz) : '';
+  return z ? `${s} ${z}` : s;
 }
 
 // "today", "tomorrow", "Thursday", or "Thu, Oct 2" further out.
@@ -179,13 +198,12 @@ export function blockerText(rule, ctx, at = ctx?.i0) {
 
 // What the forecast actually shows for a rule at one start, e.g. "Low of 44°F Fri 6 AM".
 export function obsText(rule, c, ctx, fmt) {
-  const t = i => ctx.fc.time[i];
-  const at = i => (i >= 0 ? ` ${fmt.dayHour(t(i))}` : '');
+  const at = i => (i >= 0 ? ` ${hourText(ctx, fmt, i, true)}` : '');
   const v = c.v;
   switch (rule.t) {
     case 'daylight': {
-      const d = ctx.fc.days[ctx.day[c.at >= 0 ? c.at : 0]];
-      const sun = d?.sunrise ? `Sun up ${fmt.clock(d.sunrise)} to ${fmt.clock(d.sunset)}` : 'No sunrise data';
+      const d = ctx.sun[ctx.day[c.at >= 0 ? c.at : 0]];
+      const sun = d?.riseAt && d.setAt ? `Sun up ${fmt.clock(d.riseAt)} to ${fmt.clock(d.setAt)}` : 'No sunrise data';
       return c.st === NO ? `Runs into the dark. ${sun}` : sun;
     }
     // The first hour outside them is the start itself, or a later one when the job overruns.

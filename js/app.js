@@ -2,11 +2,11 @@
 
 import { JOBS, GROUPS, byId } from './jobs.js';
 import { prepare, rateJob, findWindows, blockers, explain, alerts, waterBalance, rangesOn, localHourKey, GO, IFFY, NO, UNKNOWN } from './engine.js';
-import { makeFmt, relDay, ruleText, obsText, blockerText, alertText, aheadText, RULE_TYPES, WHEN } from './text.js';
+import { makeFmt, relDay, ruleText, obsText, blockerText, alertText, aheadText, hourText, RULE_TYPES, WHEN } from './text.js';
 import { unitFor, measureFor } from './units.js';
 import { fetchForecast, fetchHistory, searchPlaces, locate, nameFor, placeKey, placeLabel } from './weather.js';
 import * as store from './store.js';
-import { zonedToUtc, reminderFor, downloadIcs, googleLink } from './cal.js';
+import { reminderFor, downloadIcs, googleLink } from './cal.js';
 import { CALCS, calcById, jobsOf, inputsFor, quote, summaryOf, applyRoute, packName, packLabel, moneyFmt, numFmt } from './materials.js';
 import { historyRange, frostEntry, summarize, anchors, monthDayOf, dayOfSeason, monthTicks, seasonName, coolMonths, addDays, SEASON_DAYS, HARD, VERSION as FROST_VERSION } from './frost.js';
 import { CROPS, KINDS, GROUPS as PLANT_GROUPS, calendar, segments, windowsNear, weekPlan, seasonFor, say } from './planting.js';
@@ -81,6 +81,10 @@ const today = () => ctx.date[ctx.i0] || localHourKey(Date.now(), fc.tz, fc.utcOf
 const hasHours = () => !!ctx && ctx.i0 < ctx.n;
 const ahead = () => aheadText(ctx.n - ctx.i0);
 const isFar = i => i - ctx.i0 >= 7 * 24;
+// When hour i starts, on the place's own clock: "3 PM", "Sun 3 PM". (fc.time holds Open-Meteo's
+// labels, which run an hour off after a clock change; they're only used as keys in links.)
+const hourAt = i => hourText(ctx, fmt, i);
+const dayHourAt = i => hourText(ctx, fmt, i, true);
 
 function firstIndexByDate() {
   const m = new Map();
@@ -237,11 +241,10 @@ function rangeOf(w) {
 }
 
 function rangeText(a, b) {
-  const ta = fc.time[a], tb = fc.time[b];
-  if (a === ctx.i0) return a === b ? 'start now (this hour only)' : `start now, or by ${ctx.date[a] === ctx.date[b] ? fmt.hour(tb) : fmt.dayHour(tb)}`;
-  if (a === b) return `start at ${fmt.hour(ta)}`;
-  if (ctx.date[a] !== ctx.date[b]) return `start ${fmt.hour(ta)} – ${fmt.dayHour(tb)}`;
-  return `start ${fmt.hour(ta)} – ${fmt.hour(tb)}`;
+  if (a === ctx.i0) return a === b ? 'start now (this hour only)' : `start now, or by ${ctx.date[a] === ctx.date[b] ? hourAt(b) : dayHourAt(b)}`;
+  if (a === b) return `start at ${hourAt(a)}`;
+  if (ctx.date[a] !== ctx.date[b]) return `start ${hourAt(a)} – ${dayHourAt(b)}`;
+  return `start ${hourAt(a)} – ${hourAt(b)}`;
 }
 
 const dayName = i => relDay(ctx.date[i], today(), fmt, { cap: true });
@@ -330,6 +333,17 @@ const fitLabels = new ResizeObserver(entries => {
   }
 });
 
+// A day's start hours, one slot per hour column from lo to hi. Most slots hold one
+// hour. On the night the clocks go back, the repeated hour's slot holds both; on the
+// night they go forward, the skipped hour's slot is empty.
+function daySlots(first, d, lo, hi) {
+  const slots = Array.from({ length: hi - lo + 1 }, () => []);
+  for (let i = first.get(d); i < ctx.n && ctx.date[i] === d; i++) {
+    if (ctx.hour[i] >= lo && ctx.hour[i] <= hi) slots[ctx.hour[i] - lo].push(i);
+  }
+  return slots;
+}
+
 function miniGrid(res) {
   const first = firstIndexByDate();
   const dates = [...first.keys()].filter(d => d >= today()).slice(0, 7);
@@ -337,13 +351,13 @@ function miniGrid(res) {
   const grid = h('div', { class: 'mini', 'aria-hidden': 'true', 'data-cols': hi - lo + 1, style: `--cols: ${hi - lo + 1}` },
     h('span', { class: 'm-d' }),
     hourLabels(lo, hi, 'm-h'),
-    dates.map(d => {
-      const cells = new Array(hi - lo + 1).fill(null);
-      for (let i = first.get(d); i < ctx.n && ctx.date[i] === d; i++) {
-        if (ctx.hour[i] >= lo && ctx.hour[i] <= hi) cells[ctx.hour[i] - lo] = i;
-      }
-      return [h('span', { class: 'm-d' }, fmt.wd(d).slice(0, 2)), cells.map(i => h('i', { class: i == null ? 'none' : cellClass(res, i) }))];
-    }),
+    dates.map(d => [
+      h('span', { class: 'm-d' }, fmt.wd(d).slice(0, 2)),
+      daySlots(first, d, lo, hi).map(list => {
+        const sq = list.map(i => h('i', { class: cellClass(res, i) }));
+        return !sq.length ? h('i', { class: 'none' }) : sq.length === 1 ? sq[0] : h('span', { class: 'pair' }, sq);
+      }),
+    ]),
   );
   fitLabels.observe(grid);
   return grid;
@@ -426,7 +440,7 @@ function jobCard({ job, res, wins }) {
     const bl = blockerList(job, res).slice(0, 3);
     if (bl.length) sub.push(`In the way: ${bl.join(' · ')}`);
     const busyGo = res.findIndex((r, i) => i >= ctx.i0 && r?.cls === 'busy' && r.st === GO);
-    if (busyGo >= 0) sub.push(`Good while you’re busy: ${fmt.dayHour(fc.time[busyGo])}.`);
+    if (busyGo >= 0) sub.push(`Good while you’re busy: ${dayHourAt(busyGo)}.`);
   }
   return h('a', { class: 'card', href: `#/job/${encodeURIComponent(job.id)}` },
     h('div', { class: 'c-head' },
@@ -478,7 +492,7 @@ function weekTab(list) {
             h('i', { class: `dot ${y.cls}`, 'aria-hidden': 'true' }),
             h('span', { class: 'ico', 'aria-hidden': 'true' }, y.job.icon),
             h('span', { class: 'nm' }, y.job.name),
-            h('span', { class: 't' }, y.cls === 'iffy' ? 'Iffy, ' : '', y.ranges.map(r => (r.from === r.to ? fmt.hour(fc.time[r.from]) : `${fmt.hour(fc.time[r.from])} – ${fmt.hour(fc.time[r.to])}`)).join(', ')),
+            h('span', { class: 't' }, y.cls === 'iffy' ? 'Iffy, ' : '', y.ranges.map(r => (r.from === r.to ? hourAt(r.from) : `${hourAt(r.from)} – ${hourAt(r.to)}`)).join(', ')),
           ))))
         : h('p', { class: 'd-none' }, a >= b ? 'The day’s done.' : isToday ? 'Nothing on your list works today.' : 'Nothing on your list works that day.'),
       no.length > 0 && a < b && h('p', { class: 'd-no' }, h('span', {}, isToday ? 'Not today: ' : 'Not that day: '),
@@ -588,7 +602,7 @@ function windowsList(job, wins, onPick) {
       return h('li', {},
         h('button', { class: `win ${w.quality}`, onclick: () => onPick(w.best) },
           h('i', { class: `dot ${w.quality}`, 'aria-hidden': 'true' }),
-          h('span', { class: 'w-day' }, a - ctx.i0 < 6 * 24 ? dayName(a) : fmt.weekday(fc.time[a]), h('small', {}, fmt.monthDay(ctx.date[a]))),
+          h('span', { class: 'w-day' }, a - ctx.i0 < 6 * 24 ? dayName(a) : fmt.weekday(ctx.date[a]), h('small', {}, fmt.monthDay(ctx.date[a]))),
           h('span', { class: 'w-t' }, rangeText(a, b), isFar(a) && h('small', { class: 'far' }, ' · long range')),
           h('span', { class: 'w-why' }, w.quality === 'go' ? (w.bonus ? '★ All clear, with a bonus' : 'All clear') : why || 'Iffy'),
         ));
@@ -606,31 +620,43 @@ function bigGrid(job, res, onSelect) {
     h('span', { class: 'g-day' }),
     hourLabels(lo, hi, 'g-h'),
   ));
-  dates.forEach((d, row) => {
+  const cell = i => {
+    const cls = cellClass(res, i);
+    if (i < ctx.i0) return h('span', { class: `cell ${cls}` });
+    const label = `${dayHourAt(i)}: ${cls.split(' ').map(c => STATE_NAMES[c] || '').filter(Boolean).join(', ')}`;
+    return h('button', {
+      class: `cell ${cls}${selected?.s === i ? ' sel' : ''}`, 'data-i': i, 'aria-label': label, title: label,
+      tabindex: selected?.s === i ? '0' : '-1', onclick: () => onSelect(i),
+    });
+  };
+  // A forecast labelled before the clocks went forward ends just past midnight on a day of its
+  // own; that day gets no row when its hours are outside the ones shown.
+  const rows = dates.map(d => [d, daySlots(first, d, lo, hi)]).filter(([, slots]) => slots.some(list => list.length));
+  rows.forEach(([d, slots], row) => {
     if (row === 7) grid.append(h('p', { class: 'g-far' }, 'Further out, the forecast is only a rough guide'));
-    const cells = new Array(cols).fill(null);
-    for (let i = first.get(d); i < ctx.n && ctx.date[i] === d; i++) {
-      if (ctx.hour[i] >= lo && ctx.hour[i] <= hi) cells[ctx.hour[i] - lo] = i;
-    }
     grid.append(h('div', { class: `g-row${row >= 7 ? ' far' : ''}` },
       h('span', { class: 'g-day' }, row === 0 ? 'Today' : `${fmt.wd(d)} ${+d.slice(8, 10)}`),
-      cells.map(i => {
-        if (i == null) return h('span', { class: 'cell none' });
-        const cls = cellClass(res, i);
-        if (i < ctx.i0) return h('span', { class: `cell ${cls}` });
-        const label = `${fmt.dayHour(fc.time[i])}: ${cls.split(' ').map(c => STATE_NAMES[c] || '').filter(Boolean).join(', ')}`;
-        return h('button', {
-          class: `cell ${cls}${selected?.s === i ? ' sel' : ''}`, 'data-i': i, 'aria-label': label, title: label,
-          tabindex: selected?.s === i ? '0' : '-1', onclick: () => onSelect(i),
-        });
-      }),
+      slots.map(list => (!list.length ? h('span', { class: 'cell none' }) : list.length === 1 ? cell(list[0]) : h('span', { class: 'pair' }, list.map(cell)))),
     ));
   });
+  // Left and right step an hour; up and down go to the same hour the day before or after,
+  // which isn't always 24 hours away (or, when the clocks skipped it, the hour after).
+  const allDates = [...first.keys()];
+  const sameHour = (s, dir) => {
+    const d = allDates[allDates.indexOf(ctx.date[s]) + dir];
+    if (!d) return -1;
+    let later = -1;
+    for (let i = first.get(d); i < ctx.n && ctx.date[i] === d; i++) {
+      if (ctx.hour[i] === ctx.hour[s]) return i;
+      if (later < 0 && ctx.hour[i] > ctx.hour[s]) later = i;
+    }
+    return later;
+  };
   grid.addEventListener('keydown', e => {
-    const moves = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -24, ArrowDown: 24 };
+    const moves = { ArrowLeft: s => s - 1, ArrowRight: s => s + 1, ArrowUp: s => sameHour(s, -1), ArrowDown: s => sameHour(s, 1) };
     if (!(e.key in moves) || !selected) return;
     e.preventDefault();
-    const target = grid.querySelector(`[data-i="${selected.s + moves[e.key]}"]`);
+    const target = grid.querySelector(`[data-i="${moves[e.key](selected.s)}"]`);
     if (target) { target.click(); target.focus(); }
   });
   fitLabels.observe(grid);
@@ -658,8 +684,8 @@ function fillInspector(box, job, res, s) {
     h('div', { class: 'i-head' },
       h('button', { class: 'btn ghost sm', onclick: () => step(-1), disabled: s <= ctx.i0, 'aria-label': 'One hour earlier' }, '◀'),
       h('div', {},
-        h('h3', {}, `Start ${fmt.dayHour(fc.time[s])}`),
-        h('p', { class: 'muted' }, end < ctx.n ? `Done around ${fmt.hour(fc.time[end])}` : '', lastCheck > end && lastCheck <= ctx.n ? ` · checked through ${fmt.dayHour(fc.time[lastCheck - 1])}` : ''),
+        h('h3', {}, `Start ${dayHourAt(s)}`),
+        h('p', { class: 'muted' }, end < ctx.n ? `Done around ${hourAt(end)}` : '', lastCheck > end && lastCheck <= ctx.n ? ` · checked through ${dayHourAt(lastCheck - 1)}` : ''),
       ),
       h('button', { class: 'btn ghost sm', onclick: () => step(1), disabled: s >= ctx.n - 1, 'aria-label': 'One hour later' }, '▶'),
     ),
@@ -688,14 +714,15 @@ function fillInspector(box, job, res, s) {
 }
 
 function calendarButtons(job, s) {
-  const start = zonedToUtc(fc.time[s], fc.tz);
+  // The hour's own instant, and when that is on the place's clock.
+  const start = ctx.ms[s], local = ctx.local[s];
   const end = start + job.hours * 36e5;
   const title = `${job.icon} ${job.name}`;
-  const details = `${fmt.date(fc.time[s])} at ${fmt.hour(fc.time[s])}, from Good Day For (${placeLabel(state.place)}).\nForecasts change: check again the day before.\n${location.href.split('#')[0]}#/job/${encodeURIComponent(job.id)}`;
+  const details = `${fmt.date(local)} at ${hourAt(s)}, from Good Day For (${placeLabel(state.place)}).\nForecasts change: check again the day before.\n${location.href.split('#')[0]}#/job/${encodeURIComponent(job.id)}`;
   const ev = { title, details, start, end };
   return h('div', { class: 'i-actions' },
     // The file carries a reminder the evening before. A Google link can't; Google uses your own.
-    h('button', { class: 'btn', onclick: () => downloadIcs({ ...ev, remind: reminderFor(start, fc.time[s], fc.tz) }, `${job.id}-${fc.time[s].slice(0, 10)}.ics`) }, 'Add to calendar'),
+    h('button', { class: 'btn', onclick: () => downloadIcs({ ...ev, remind: reminderFor(start, local, fc.tz) }, `${job.id}-${local.slice(0, 10)}.ics`) }, 'Add to calendar'),
     h('a', { class: 'btn ghost', href: googleLink(ev), target: '_blank', rel: 'noopener' }, 'Google Calendar'),
   );
 }

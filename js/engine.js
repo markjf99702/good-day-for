@@ -3,8 +3,11 @@
 // including the drying or curing time after it?"
 //
 // Everything in here is metric (°C, %, mm, km/h, kPa) and knows nothing about
-// the page. Times are the place's own local clock ("2026-09-27T10:00"), one
-// forecast entry per hour, so "24 hours after" is simply 24 entries later.
+// the page. There's one forecast entry per hour, so "24 hours after" is simply
+// 24 entries later. Open-Meteo labels the entries ("2026-09-27T10:00") with the
+// one UTC offset in force when the forecast was fetched, even past a clock
+// change, so the dates, hours and weekdays here come from each hour's real
+// instant on the place's own clock, not from the labels.
 
 export const GO = 0, IFFY = 1, NO = 2, UNKNOWN = 3;
 
@@ -25,28 +28,68 @@ export const LAWN = { cap: 25.4, kc: 0.8 };
 
 const SOIL_KEYS = { 6: 'soil6', 18: 'soil18' };
 
+// The instant an Open-Meteo label stands for, in UTC milliseconds.
+export function instantOf(label, utcOffset = 0) {
+  return Date.UTC(+label.slice(0, 4), +label.slice(5, 7) - 1, +label.slice(8, 10), +label.slice(11, 13) || 0, +label.slice(14, 16) || 0) - utcOffset * 1000;
+}
+
+// Instant → "YYYY-MM-DDTHH:MM" on the place's own clock. Without a time zone
+// (or a browser that doesn't know it), the forecast's own offset, as it's labelled.
+export function wallClock(tz, utcOffset = 0) {
+  const fixed = ms => new Date(ms + utcOffset * 1000).toISOString().slice(0, 16);
+  let f;
+  try {
+    if (!tz) return fixed;
+    f = new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+    });
+  } catch {
+    return fixed;
+  }
+  return ms => {
+    try {
+      const p = {};
+      for (const x of f.formatToParts(new Date(ms))) p[x.type] = x.value;
+      return `${p.year}-${p.month}-${p.day}T${p.hour === '24' ? '00' : p.hour}:${p.minute}`;
+    } catch {
+      return fixed(ms);
+    }
+  };
+}
+
 // Build everything the rules need from a normalized forecast (see weather.js).
+//   ms:     each hour's instant          local: when it starts on the place's clock
+//   date, hour, wday: from local         day:   which of fc.days it falls on (-1 for none)
+//   twice:  the hour the clocks go back over, which comes round twice
 export function prepare(fc, nowMs = Date.now()) {
   const n = fc.time.length;
-  const date = new Array(n), hour = new Array(n), wday = new Array(n), day = new Array(n);
+  const clock = wallClock(fc.tz, fc.utcOffset);
+  const ms = new Array(n), local = new Array(n), date = new Array(n), hour = new Array(n), wday = new Array(n), day = new Array(n);
   const dayOf = new Map(fc.days.map((d, i) => [d.date, i]));
   for (let i = 0; i < n; i++) {
-    const t = fc.time[i];
+    ms[i] = instantOf(fc.time[i], fc.utcOffset);
+    const t = local[i] = clock(ms[i]);
     date[i] = t.slice(0, 10);
     hour[i] = +t.slice(11, 13);
     wday[i] = new Date(Date.UTC(+t.slice(0, 4), +t.slice(5, 7) - 1, +t.slice(8, 10))).getUTCDay();
     day[i] = dayOf.has(date[i]) ? dayOf.get(date[i]) : -1;
   }
+  const twice = new Array(n).fill(false);
+  for (let i = 1; i < n; i++) if (local[i].slice(0, 13) === local[i - 1].slice(0, 13)) twice[i] = twice[i - 1] = true;
 
   // An hour is light if all of it falls between sunrise and sunset, give or
-  // take half an hour of twilight on either end.
-  const mins = s => (s ? +s.slice(11, 13) * 60 + +s.slice(14, 16) : null);
-  const sun = fc.days.map(d => ({ rise: mins(d.sunrise), set: mins(d.sunset) }));
+  // take half an hour of twilight on either end. Sunrise and sunset are
+  // labelled the same way as the hours.
+  const sun = fc.days.map(d => {
+    const rise = d.sunrise ? instantOf(d.sunrise, fc.utcOffset) : null;
+    const set = d.sunset ? instantOf(d.sunset, fc.utcOffset) : null;
+    return { rise, set, riseAt: rise == null ? null : clock(rise), setAt: set == null ? null : clock(set) };
+  });
   const light = new Array(n);
   for (let i = 0; i < n; i++) {
     const s = sun[day[i]];
     light[i] = !!s && s.rise != null && s.set != null &&
-      hour[i] * 60 >= s.rise - 30 && (hour[i] + 1) * 60 <= s.set + 30;
+      ms[i] >= s.rise - 30 * 6e4 && ms[i] + 36e5 <= s.set + 30 * 6e4;
   }
 
   // Daily mean soil temperature at each depth.
@@ -72,11 +115,11 @@ export function prepare(fc, nowMs = Date.now()) {
     deficit[i] = LAWN.cap - bucket;
   }
 
-  const nowKey = localHourKey(nowMs, fc.tz, fc.utcOffset);
-  let i0 = fc.time.findIndex(t => t.slice(0, 13) >= nowKey);
+  // The hour that's under way now.
+  let i0 = ms.findIndex(t => t + 36e5 > nowMs);
   if (i0 < 0) i0 = n;
 
-  return { fc, n, i0, date, hour, wday, day, light, sun, soil, deficit, avail: null };
+  return { fc, n, i0, ms, local, date, hour, wday, day, twice, light, sun, soil, deficit, avail: null };
 }
 
 // "YYYY-MM-DDTHH" for an instant, on the clock of the forecast's place.

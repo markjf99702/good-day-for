@@ -32,6 +32,16 @@ export const SCENARIO = {
   15: { hi: 67, lo: 49, dew: 46, wind: 5, cloud: 30, pop: 15 },
 };
 
+// Like Open-Meteo, makeForecast labels every hour (and sunrise and sunset) with the one UTC
+// offset in force at `now`, even past a clock change. These are moments whose forecast runs
+// across one: the US goes back an hour at 2 AM on Sunday, November 1, 2026 and forward at
+// 2 AM on Sunday, March 14, 2027, and Europe goes back at 3 AM on Sunday, October 25, 2026.
+export const CLOCK_CHANGES = {
+  back: { now: Date.UTC(2026, 9, 28, 13, 20), tz: 'America/New_York', date: '2026-11-01' },   // Wed Oct 28, 9:20 AM EDT
+  forward: { now: Date.UTC(2027, 2, 10, 14, 20), tz: 'America/New_York', date: '2027-03-14' }, // Wed Mar 10, 9:20 AM EST
+  europe: { now: Date.UTC(2026, 9, 20, 7, 20), tz: 'Europe/Berlin', date: '2026-10-25' },      // Tue Oct 20, 9:20 AM CEST
+};
+
 const es = t => 0.6108 * Math.exp((17.27 * t) / (t + 237.3)); // kPa
 
 function localParts(ms, tz) {
@@ -59,13 +69,22 @@ export function makeForecast({ now = Date.now(), tz = 'America/New_York', scenar
   const get = d => scenario[d] || scenario[String(d)] || { hi: 68, lo: 50, dew: 48, wind: 6, cloud: 40 };
   let soil6 = F(66), soil18 = F(67);
 
-  for (const d of dayList) {
-    const S = get(d), N = get(d + 1), P = get(d - 1);
-    const dayMs = today + d * 864e5;
+  // The scenario's days and hours are the place's own clock, which runs an hour off the
+  // labels once the forecast crosses a clock change.
+  const clock = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hourCycle: 'h23' });
+  const onClock = ms => {
+    const q = Object.fromEntries(clock.formatToParts(new Date(ms)).map(x => [x.type, x.value]));
+    return { d: Math.round((Date.UTC(+q.year, +q.month - 1, +q.day) - today) / 864e5), h: +q.hour % 24 };
+  };
+
+  for (const day of dayList) {
+    const dayMs = today + day * 864e5;
     daily.time.push(iso(dayMs).slice(0, 10));
     daily.sunrise.push(iso(dayMs + (7 * 60 + 21) * 6e4));
     daily.sunset.push(iso(dayMs + (19 * 60 + 14) * 6e4));
-    for (let h = 0; h < 24; h++) {
+    for (let k = 0; k < 24; k++) {
+      const { d, h } = onClock(dayMs + k * 36e5 - offset * 1000);
+      const S = get(d), N = get(d + 1), P = get(d - 1);
       // Low at 6 AM, high at 3 PM; evenings slide toward tomorrow's low.
       let tf;
       if (h < 6) tf = P.hi + (S.lo - P.hi) * (0.5 - 0.5 * Math.cos(Math.PI * (h + 9) / 15));
@@ -80,7 +99,7 @@ export function makeForecast({ now = Date.now(), tz = 'America/New_York', scenar
       const mm = rain ? IN(rain[0]) : 0;
       const pop = rain ? rain[1] : (S.pop ?? (S.cloud > 60 ? 15 : 5));
       const wind = (S.wind + (light ? 4 * Math.sin(Math.PI * (h - 7) / 12) : 0)) * 1.609344;
-      H.time.push(iso(dayMs + h * 36e5));
+      H.time.push(iso(dayMs + k * 36e5));
       H.temperature_2m.push(+t.toFixed(1));
       H.dew_point_2m.push(+dew.toFixed(1));
       H.relative_humidity_2m.push(rh);

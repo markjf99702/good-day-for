@@ -128,4 +128,4 @@ To put it online with GitHub Pages: **Settings → Pages → Build and deploymen
 - `sw.js`: keeps a copy for using offline.
 - `carry.js`: brings saves over from junkdrawer.works/good-day-for/ the first time it opens here.
 - `tools/make-icons.mjs`: redraws the PNG icons from `icon.svg` and `tools/icon-full-bleed.svg`.
-- `test/fixture.js`: a realistic made-up forecast built around today's date, and a made-up weather history with frost dates you choose, used by the tests.
+- `test/fixture.js`: a realistic made-up forecast built around today's date (or a day whose forecast runs across a clock change), and a made-up weather history with frost dates you choose, used by the tests.

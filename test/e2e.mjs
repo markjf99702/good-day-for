@@ -9,7 +9,7 @@ import { execSync } from 'node:child_process';
 import { join, extname, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
-import { makeForecast, makeArchive, NO_FROST } from './fixture.js';
+import { makeForecast, makeArchive, NO_FROST, CLOCK_CHANGES } from './fixture.js';
 import { historyRange, frostEntry, summarize, monthDayOf } from '../js/frost.js';
 import { calendar } from '../js/planting.js';
 import { normalize, placeKey } from '../js/weather.js';
@@ -188,7 +188,7 @@ try {
   await page.locator('.trimmed').waitFor();
   await snap(page, '04-detail');
   // A rainy hour on day 2 explains itself.
-  const rainy = page.locator('.cell.no').nth(40);
+  const rainy = page.locator('.g-row:not(.g-hours)').nth(2).locator('.cell.no').first();
   await rainy.click();
   await page.locator('.verdict.no').waitFor();
   assert.ok(await page.locator('.checks li.bad').count() >= 1);
@@ -459,6 +459,85 @@ try {
   const sooner = await pwet.locator('.card', { hasText: 'Mow the lawn' }).getByText(/^Iffy sooner:/).textContent();
   assert.match(sooner, /^Iffy sooner: (Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday), start /);
   await cw.close();
+
+  // ——— A clock change in the forecast ———
+  // Fetched on Wednesday, October 28, 2026, labelled at the summer offset all the way through:
+  // after the clocks go back on Sunday, every hour is read on Columbus's real clock.
+  {
+    const { now, tz } = CLOCK_CHANGES.back;
+    const { context: cc, page: pc } = await newPage({}, { weather: () => JSON.stringify(makeForecast({ now, tz })) });
+    await pc.clock.setFixedTime(new Date(now));
+    await pc.goto(base);
+    await setPlace(pc, COLUMBUS);
+    await pc.locator('.cards .card').first().waitFor();
+    assert.equal(await pc.locator('.card', { hasText: 'Water the lawn' }).locator('.mini .pair').count(), 1, 'the repeated hour has its own square on the card');
+    // The sprinkler's grid: Sunday has 1 AM twice, each with its own square, saying which is which.
+    await pc.goto(base + '#/job/water');
+    await pc.locator('.inspect').waitFor();
+    const row = d => pc.locator('.g-row', { has: pc.locator('.g-day', { hasText: new RegExp(`^${d}$`) }) });
+    assert.equal(await row('Sun 1').locator('button.cell').count(), 25, '25 hours that Sunday');
+    const pair = row('Sun 1').locator('.pair button');
+    assert.deepEqual([await pair.nth(0).getAttribute('aria-label'), await pair.nth(1).getAttribute('aria-label')].map(l => l.split(':')[0]), ['Sun 1 AM EDT', 'Sun 1 AM EST']);
+    // Up and down go to the same hour on the next day, though that Sunday is 25 hours long.
+    const heading = () => pc.locator('.inspect h3').textContent();
+    await pc.locator('.cell[aria-label^="Sat 3 PM:"]').first().click();
+    assert.equal(await heading(), 'Start Sat 3 PM');
+    await pc.locator('.cell.sel').focus();
+    await pc.keyboard.press('ArrowDown');
+    assert.equal(await heading(), 'Start Sun 3 PM');
+    await pc.keyboard.press('ArrowDown');
+    assert.equal(await heading(), 'Start Mon 3 PM');
+    await pc.keyboard.press('ArrowUp');
+    assert.equal(await heading(), 'Start Sun 3 PM');
+    // A link made with the forecast's own label opens the same hour, read on the real clock,
+    // and the 4-to-10-AM rule takes it as 9 AM.
+    await pc.goto(base + '#/job/water/2026-11-02T10:00');
+    await pc.locator('.inspect h3', { hasText: 'Start Mon 9 AM' }).waitFor();
+    assert.equal(await pc.locator('.checks li', { hasText: 'Between 4 AM and 10 AM' }).locator('.obs').textContent(), 'Fits');
+    // The sun's up an hour earlier by the clock, so laundry can start at 6 AM on Monday.
+    await pc.goto(base + '#/job/laundry');
+    await pc.locator('.inspect').waitFor();
+    assert.doesNotMatch(await pc.locator('.cell[aria-label^="Mon 6 AM:"]').first().getAttribute('aria-label'), /Dark/);
+    assert.match(await pc.locator('.cell[aria-label^="Mon 5 AM:"]').first().getAttribute('aria-label'), /Dark/);
+    // Add to calendar starts at that hour's real instant: 11 AM EST on Monday is 16:00 UTC,
+    // with the reminder at 7 PM the evening before.
+    await pc.goto(base + '#/job/mow/2026-11-02T12:00');
+    await pc.locator('.inspect h3', { hasText: 'Start Mon 11 AM' }).waitFor();
+    const [dlc] = await Promise.all([pc.waitForEvent('download'), pc.getByRole('button', { name: 'Add to calendar' }).click()]);
+    const icsc = (await readFile(await dlc.path(), 'utf8')).replace(/\r\n /g, '');
+    assert.match(icsc, /DTSTART:20261102T160000Z\r\n/);
+    assert.match(icsc, /DTEND:20261102T170000Z\r\n/);
+    assert.match(icsc, /TRIGGER:-PT16H\r\n/);
+    assert.match(icsc, /DESCRIPTION:Mon\\, Nov 2 at 11 AM\\, from Good Day For/);
+    assert.equal(dlc.suggestedFilename(), 'mow-2026-11-02.ics');
+    const google = new URL(await pc.getByRole('link', { name: 'Google Calendar' }).getAttribute('href'));
+    assert.equal(google.searchParams.get('dates'), '20261102T160000Z/20261102T170000Z');
+    await cc.close();
+  }
+  // In March the clocks go forward: that Sunday has no 2 AM, and down from 2 AM goes to 3.
+  {
+    const { now, tz } = CLOCK_CHANGES.forward;
+    const { context: cc, page: pc } = await newPage({}, { weather: () => JSON.stringify(makeForecast({ now, tz })) });
+    await pc.clock.setFixedTime(new Date(now));
+    await pc.goto(base);
+    await setPlace(pc, COLUMBUS);
+    await pc.goto(base + '#/job/water');
+    await pc.locator('.inspect').waitFor();
+    const sunday = pc.locator('.g-row', { has: pc.locator('.g-day', { hasText: /^Sun 14$/ }) });
+    assert.equal(await sunday.locator('button.cell').count(), 23);
+    assert.equal(await sunday.locator(':scope > :nth-child(4)').getAttribute('class'), 'cell none', 'a gap where 2 AM would be');
+    await pc.locator('.cell[aria-label^="Sat 2 AM:"]').first().click();
+    await pc.locator('.cell.sel').focus();
+    await pc.keyboard.press('ArrowDown');
+    assert.equal(await pc.locator('.inspect h3').textContent(), 'Start Sun 3 AM');
+    // The forecast's last hour is midnight on the 26th by then: the sprinkler gets that square,
+    // and a daylight job gets no empty row for it.
+    assert.equal(await pc.locator('.g-row').last().locator('.g-day').textContent(), 'Fri 26');
+    await pc.goto(base + '#/job/laundry');
+    await pc.locator('.inspect').waitFor();
+    assert.equal(await pc.locator('.g-row').last().locator('.g-day').textContent(), 'Thu 25');
+    await cc.close();
+  }
 
   // ——— When the services can't be reached ———
   const { context: cd, page: pd } = await newPage({}, { down: ['forecast', 'search'] });

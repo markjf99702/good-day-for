@@ -196,6 +196,8 @@ main { width: 100%; max-width: 1100px; margin: 0 auto; padding: 1rem 16px 2rem; 
 .mini i { display: block; height: 10px; border-radius: 2px; background: var(--c, var(--off)); }
 .mini i.none { background: transparent; }
 .mini i.busy { opacity: .3; }
+/* The night the clocks go back, the hour that comes round twice: both of its starts share its column. */
+.mini .pair, .g-row .pair { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 1px; }
 .m-d { font-size: .62rem; color: var(--ink-2); line-height: 1; }
 .m-h { font-size: .62rem; color: var(--ink-2); white-space: nowrap; line-height: 1.2; display: flex; justify-content: center; }
 
