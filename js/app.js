@@ -1292,7 +1292,7 @@ function noFrostPlanting(sum) {
         'Tender plants like tomatoes, peppers and basil can go out whenever the nights are mild, and they struggle through the hottest weeks.'),
       cool.length > 0 && h('p', {}, 'Cool-season crops (lettuce, peas, broccoli, carrots, cilantro) do best in the cooler months, about ',
         h('b', {}, `${fmt.month(cool[0])} to ${fmt.month(cool.at(-1))}`), ' here.'),
-      h('p', {}, 'For the lawn, crabgrass preventer and seeding go by soil temperature, which ', link('preemergent'), ' and ', link('seed-warm'), ' keep an eye on.')),
+      h('p', {}, 'For the lawn, crabgrass preventer and seeding go by soil temperature. These jobs watch it for you: ', link('preemergent'), ' and ', link('seed-warm'), '.')),
   );
 }
 
